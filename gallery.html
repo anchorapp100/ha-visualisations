@@ -1,0 +1,277 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Voice Visuals</title>
+<style>
+  :root{--bg:#0e1621;--card:#1a2431;--card2:#131c27;--ink:#eff4f9;--dim:#8ea0b5;--line:rgba(255,255,255,.08);
+        --amber:#ffb638;--amber-ink:#ffd792;--green:#37d98a;--red:#ff5c7a;}
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+  [hidden]{display:none !important;}
+  html,body{margin:0;min-height:100%;}
+  body{background:var(--bg);color:var(--ink);font:15px/1.4 -apple-system,"Segoe UI",Roboto,system-ui,sans-serif;padding:14px 16px 44px;}
+  .top{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:4px;}
+  .top .sp{flex:1;}
+  h1{font-size:20px;font-weight:800;margin:0;}
+  .sub{color:var(--dim);font-size:13px;margin:4px 0 16px;max-width:72ch;}
+  .btn{border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:12px;padding:10px 14px;font:700 14px/1 inherit;font-family:inherit;cursor:pointer;display:inline-flex;align-items:center;gap:8px;white-space:nowrap;}
+  .btn:active{transform:scale(.97);}
+  .btn:focus-visible,.card:focus-visible,.seg button:focus-visible{outline:2px solid var(--amber);outline-offset:2px;}
+  .btn.amber{background:rgba(255,182,56,.16);border-color:rgba(255,182,56,.5);color:var(--amber-ink);}
+  .btn[disabled]{opacity:.55;cursor:default;transform:none;}
+  .chip{font-size:12px;font-weight:700;padding:6px 11px;border-radius:20px;border:1px solid rgba(255,182,56,.45);background:rgba(255,182,56,.12);color:var(--amber-ink);}
+  .chip.warn{border-color:rgba(255,92,122,.45);background:rgba(255,92,122,.12);color:#ffd0da;}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:14px;}
+  .card{background:linear-gradient(155deg,var(--card),var(--card2));border:1px solid var(--line);border-radius:16px;overflow:hidden;cursor:pointer;
+        display:flex;flex-direction:column;text-align:left;color:inherit;font:inherit;padding:0;}
+  .card:active{transform:scale(.985);}
+  .card.use{border-color:rgba(255,182,56,.7);box-shadow:0 0 24px -8px var(--amber);}
+  .thumb{position:relative;aspect-ratio:16/10;background:#000;overflow:hidden;}
+  .thumb .vv-stage{position:absolute;inset:0;}
+  .thumb .lbl{position:absolute;left:10px;bottom:8px;font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:rgba(255,255,255,.72);
+              text-shadow:0 1px 3px rgba(0,0,0,.9);pointer-events:none;}
+  .meta{padding:10px 12px 13px;display:flex;flex-direction:column;gap:4px;}
+  .nm{font-weight:700;font-size:15px;display:flex;align-items:center;gap:8px;}
+  .bl{font-size:12px;color:var(--dim);line-height:1.35;}
+  .badge{font-size:10px;font-weight:800;padding:2px 8px;border-radius:20px;background:rgba(255,182,56,.2);color:var(--amber-ink);border:1px solid rgba(255,182,56,.45);text-transform:uppercase;letter-spacing:.04em;}
+  .sec{font-size:12px;font-weight:800;color:var(--dim);text-transform:uppercase;letter-spacing:.6px;margin:26px 2px 10px;}
+  .set{background:linear-gradient(155deg,var(--card),var(--card2));border:1px solid var(--line);border-radius:16px;padding:14px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;}
+  .set .d{flex:1;min-width:220px;font-size:13px;color:var(--dim);}
+  .set .d b{display:block;color:var(--ink);font-size:14px;margin-bottom:2px;}
+  .seg{display:inline-flex;border:1px solid var(--line);border-radius:10px;overflow:hidden;}
+  .seg button{border:0;background:transparent;color:var(--dim);padding:9px 13px;font:700 13px/1 inherit;font-family:inherit;cursor:pointer;}
+  .seg button+button{border-left:1px solid var(--line);}
+  .seg button.on{background:rgba(255,182,56,.18);color:var(--amber-ink);}
+  /* full preview */
+  .pv{position:fixed;inset:0;z-index:10;background:#000;display:none;}
+  .pv.on{display:block;}
+  body.pv-open{overflow:hidden;}
+  .pv .vv-stage{position:absolute;inset:0;}
+  .bar{position:absolute;left:0;right:0;top:0;z-index:3;display:flex;align-items:center;gap:10px;padding:12px 14px 26px;
+       background:linear-gradient(rgba(3,6,12,.82),rgba(3,6,12,0));transition:opacity .4s ease;}
+  .bar.hide{opacity:0;pointer-events:none;}
+  .bar .t{flex:1;min-width:0;}
+  .bar .t b{display:block;font-size:17px;}
+  .bar .t span{display:block;font-size:12px;color:#b8c4d3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .bar .btn{background:rgba(26,36,49,.85);}
+  .bar .btn.amber{background:rgba(255,182,56,.2);}
+  .toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%) translateY(20px);opacity:0;z-index:20;background:#1f2b3a;border:1px solid var(--line);
+         color:var(--ink);padding:11px 16px;border-radius:12px;font-size:14px;font-weight:600;transition:opacity .25s ease,transform .25s ease;pointer-events:none;max-width:90vw;}
+  .toast.on{opacity:1;transform:translateX(-50%) translateY(0);}
+  .err{color:#ffd0da;font-size:13px;margin-top:10px;}
+  @media (max-width:560px){ .bar .t span{display:none;} .bar .btn{padding:9px 11px;} }
+  @media (prefers-reduced-motion: reduce){ .card:active,.btn:active{transform:none;} .toast{transition:none;} }
+</style>
+</head>
+<body>
+  <div class="top">
+    <button class="btn" id="back" hidden>&#8249; Back</button>
+    <h1>Voice visuals</h1>
+    <span class="sp"></span>
+    <span class="chip" id="cur">Loading…</span>
+  </div>
+  <p class="sub">What your screens show while you talk to your voice assistant. Every one reacts to the real sound: your voice while it listens, the reply while it answers. Tap one to watch it with a real conversation.</p>
+  <div class="grid" id="grid"></div>
+
+  <div class="sec">This screen</div>
+  <div class="set">
+    <div class="d"><b>Show voice visuals here</b>Auto follows the dashboards set in config.json. Always and Never apply to this screen alone.</div>
+    <div class="seg" id="seg"><button data-v="">Auto</button><button data-v="1">Always</button><button data-v="0">Never</button></div>
+  </div>
+  <div class="err" id="err" hidden></div>
+
+  <div class="pv" id="pv" aria-hidden="true">
+    <div class="bar" id="bar">
+      <button class="btn" id="pvClose" aria-label="Back to all visuals">&#8249; All</button>
+      <div class="t"><b id="pvName"></b><span id="pvBlurb"></span></div>
+      <button class="btn" id="pvPrev" aria-label="Previous visual">&#9664;</button>
+      <button class="btn" id="pvNext" aria-label="Next visual">&#9654;</button>
+      <button class="btn" id="pvFull" hidden>Full screen</button>
+      <button class="btn amber" id="pvUse">Use this visual</button>
+    </div>
+  </div>
+  <div class="toast" id="toast" role="status"></div>
+
+<script>
+window.__VV_NO_OVERLAY = true;           // the gallery previews skins; it never runs the live overlay itself
+(function () {
+  "use strict";
+  var SEL = "input_select.voice_visual", SURPRISE = "Surprise me";
+  var $ = function (id) { return document.getElementById(id); };
+  var VV, cards = [], cur = null, helper = null, pv = null, fps = 30, blockedUntil = 0, memTok = null;
+
+  function lsGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+  function lsSet(k, v) { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (e) {} }
+
+  var params = new URLSearchParams(location.search), back = params.get("back");
+  if (back && /^\/local\/[\w\-./]+(\?[\w\-=&.%]*)?$/.test(back)) { $("back").hidden = false; $("back").onclick = function () { location.href = back; }; }
+
+  /* ---------- Home Assistant REST (same origin; the panel's own login) ---------- */
+  function hassTokens() { try { return JSON.parse(lsGet("hassTokens") || "null"); } catch (e) { return null; } }
+  function token() {
+    var t = memTok || hassTokens();
+    if (!t || !t.access_token) return Promise.reject("signin");
+    if (t.expires && Date.now() < t.expires - 30000) return Promise.resolve(t.access_token);
+    if (!t.refresh_token) return Promise.reject("expired");
+    return fetch("/auth/token", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: "grant_type=refresh_token&client_id=" + encodeURIComponent(t.clientId || (location.origin + "/")) + "&refresh_token=" + encodeURIComponent(t.refresh_token) })
+      .then(function (r) { if (!r.ok) throw "expired"; return r.json(); })
+      .then(function (j) { memTok = Object.assign({}, t, { access_token: j.access_token, expires: Date.now() + j.expires_in * 1000 }); return memTok.access_token; });
+  }
+  function api(method, path, body) {
+    if (Date.now() < blockedUntil) return Promise.reject("backoff");
+    return token().then(function (tk) {
+      return fetch(path, { method: method, headers: { Authorization: "Bearer " + tk, "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
+    }).then(function (r) {
+      if (r.status === 401 || r.status === 403) { blockedUntil = Date.now() + 60000; throw "auth"; }
+      if (r.status === 404) throw "missing";
+      if (!r.ok) throw "http-" + r.status;
+      return r.json();
+    });
+  }
+  function explain(e) {
+    return e === "signin" || e === "expired" || e === "auth" ? "open this page inside Home Assistant so it can use your login"
+         : e === "missing" ? "the Voice visual helper isn't set up in Home Assistant yet"
+         : e === "backoff" ? "Home Assistant refused the last request; try again in a minute" : String(e);
+  }
+
+  /* ---------- selection ---------- */
+  function nameOf(v) { if (!v) return null; if (v === SURPRISE) return v; var s = VV.skinByName(v); return s ? s.name : null; }
+  function loadCurrent() {
+    api("GET", "/api/states/" + SEL).then(function (s) { helper = true; cur = s.state; paint(); })
+      .catch(function (e) { helper = e === "missing" ? false : null; cur = nameOf(lsGet("vvSkin")) || "Lens Flares"; paint(e); });
+  }
+  function use(name) {
+    if (helper) {
+      api("POST", "/api/services/input_select/select_option", { entity_id: SEL, option: name })
+        .then(function () { cur = name; paint(); toast(name === SURPRISE ? "A different visual each time you talk" : "Now using " + name + " from your next conversation"); })
+        .catch(function (e) { toast("Couldn't save: " + explain(e)); });
+    } else {
+      lsSet("vvSkin", name); cur = name; paint();
+      toast("Saved for this screen" + (helper === false ? " (the shared Voice visual helper isn't set up yet)" : ""));
+    }
+  }
+  function paint(e) {
+    $("cur").textContent = cur ? "In use: " + cur : "In use: Lens Flares";
+    $("cur").className = "chip" + (e && e !== "missing" ? " warn" : "");
+    cards.forEach(function (c) {
+      var on = c.name === cur; c.el.classList.toggle("use", on);
+      c.badge.hidden = !on;
+    });
+    if (pv) syncPvUse();
+    var err = $("err");
+    if (e && e !== "missing") { err.hidden = false; err.textContent = "Showing previews only: " + explain(e) + "."; } else err.hidden = true;
+  }
+
+  /* ---------- cards ---------- */
+  function buildCards() {
+    var grid = $("grid"), list = VV.skins.map(function (s) { return { id: s.id, name: s.name, blurb: s.blurb }; });
+    list.push({ id: null, name: SURPRISE, blurb: "A different visual every time you talk.", surprise: true });
+    list.forEach(function (it, i) {
+      var el = document.createElement("button"); el.className = "card"; el.type = "button";
+      el.innerHTML = "<div class='thumb'></div><div class='meta'><div class='nm'><span></span><span class='badge' hidden>In use</span></div><div class='bl'></div></div>";
+      el.querySelector(".nm span").textContent = it.name; el.querySelector(".bl").textContent = it.blurb;
+      grid.appendChild(el);
+      var th = el.querySelector(".thumb");
+      var stage = new VV.Stage(th, { thumb: true, quality: 0.6, skin: it.surprise ? VV.skins[i % VV.skins.length].id : it.id });
+      var c = { el: el, id: it.id, name: it.name, blurb: it.blurb, surprise: !!it.surprise, stage: stage, demo: new VV.Demo(i * 1.9), vis: false,
+                badge: el.querySelector(".badge"), idx: i, swapAt: 0, lbl: null };
+      if (c.surprise) { c.lbl = document.createElement("div"); c.lbl.className = "lbl"; th.appendChild(c.lbl); c.lbl.textContent = stage.skin.name; }
+      el.onclick = function () { openPv(i); };
+      cards.push(c);
+    });
+    if ("IntersectionObserver" in window) {
+      var io = new IntersectionObserver(function (ents) { ents.forEach(function (en) { cards.forEach(function (c) { if (c.el === en.target) c.vis = en.isIntersecting; }); }); });
+      cards.forEach(function (c) { io.observe(c.el); });
+    } else cards.forEach(function (c) { c.vis = true; });
+  }
+  function randomSkin(not) { var pool = VV.skins.filter(function (s) { return s.id !== not; }); return pool[Math.floor(Math.random() * pool.length)].id; }
+
+  /* ---------- full preview ---------- */
+  var barTimer = null;
+  function wakeBar() { $("bar").classList.remove("hide"); clearTimeout(barTimer); barTimer = setTimeout(function () { $("bar").classList.add("hide"); }, 6000); }
+  function openPv(i) {
+    var c = cards[i], now = performance.now() / 1000;
+    if (!pv) { pv = { stage: new VV.Stage($("pv"), { skin: VV.skins[0].id }) }; $("pv").insertBefore(pv.stage.el, $("bar")); }
+    pv.i = i; pv.demo = new VV.Demo(-now); pv.lastState = "idle";
+    pv.stage.setSkin(c.surprise ? randomSkin(null) : c.id);
+    $("pvName").textContent = c.surprise ? SURPRISE + " · " + pv.stage.skin.name : c.name;
+    $("pvBlurb").textContent = c.blurb;
+    syncPvUse();
+    $("pv").classList.add("on"); $("pv").setAttribute("aria-hidden", "false"); document.body.classList.add("pv-open"); wakeBar();
+  }
+  function closePv() { if (!pv) return; $("pv").classList.remove("on"); $("pv").setAttribute("aria-hidden", "true"); document.body.classList.remove("pv-open"); pv.i = -1; }
+  function stepPv(d) { if (pv && pv.i >= 0) openPv((pv.i + d + cards.length) % cards.length); }
+  function syncPvUse() {
+    if (!pv || pv.i < 0) return;
+    var on = cards[pv.i].name === cur, b = $("pvUse");
+    b.disabled = on; b.textContent = on ? "In use" : "Use this visual";
+  }
+  $("pvClose").onclick = closePv; $("pvPrev").onclick = function () { stepPv(-1); }; $("pvNext").onclick = function () { stepPv(1); };
+  $("pvUse").onclick = function () { if (pv && pv.i >= 0) use(cards[pv.i].name); };
+  $("pv").addEventListener("pointermove", wakeBar); $("pv").addEventListener("pointerdown", wakeBar);
+  document.addEventListener("keydown", function (e) {
+    if (!pv || pv.i < 0) return;
+    if (e.key === "Escape") closePv(); else if (e.key === "ArrowLeft") stepPv(-1); else if (e.key === "ArrowRight") stepPv(1); else return;
+    wakeBar();
+  });
+  // Full screen on the real overlay (when this gallery is opened inside a Home Assistant dashboard)
+  function parentVV() { try { return window.parent !== window && window.parent.VoiceVisuals && window.parent.VoiceVisuals.playDemo ? window.parent.VoiceVisuals : null; } catch (e) { return null; } }
+  $("pvFull").onclick = function () {
+    var P = parentVV(); if (!P || !pv || pv.i < 0) return;
+    if (P.playDemo(pv.stage.skin.id)) closePv(); else toast("The assistant is busy talking; try again in a moment");
+  };
+
+  /* ---------- this-screen setting ---------- */
+  function paintSeg() { var v = lsGet("vvOverlay") || ""; Array.prototype.forEach.call($("seg").children, function (b) { b.classList.toggle("on", b.getAttribute("data-v") === v); }); }
+  $("seg").onclick = function (e) {
+    var b = e.target.closest("button"); if (!b) return;
+    var v = b.getAttribute("data-v"); lsSet("vvOverlay", v || null); paintSeg();
+    toast(v === "1" ? "This screen will always show voice visuals" : v === "0" ? "This screen won't show voice visuals" : "This screen follows the default");
+  };
+
+  var toastT = null;
+  function toast(msg) { var t = $("toast"); t.textContent = msg; t.classList.add("on"); clearTimeout(toastT); toastT = setTimeout(function () { t.classList.remove("on"); }, 3200); }
+
+  /* ---------- animation ---------- */
+  var lastThumb = 0, lastPv = 0;
+  function loop(ms) {
+    requestAnimationFrame(loop);
+    var t = ms / 1000;
+    if (pv && pv.i >= 0) {
+      if (ms - lastPv < 1000 / fps - 2) return; lastPv = ms;
+      var s = pv.demo.sample(t), c = cards[pv.i];
+      if (c.surprise && s.state === "listening" && pv.lastState !== "listening") { pv.stage.setSkin(randomSkin(pv.stage.skin.id)); $("pvName").textContent = SURPRISE + " · " + pv.stage.skin.name; }
+      pv.lastState = s.state;
+      pv.stage.draw(s.f); pv.stage.text(s.status, s.user, s.reply);
+      return;
+    }
+    if (ms - lastThumb < 1000 / 24) return; lastThumb = ms;
+    for (var i = 0; i < cards.length; i++) {
+      var cd = cards[i]; if (!cd.vis) continue;
+      if (cd.surprise && t > cd.swapAt) { cd.swapAt = t + 4; cd.stage.setSkin(randomSkin(cd.stage.skin.id)); cd.lbl.textContent = cd.stage.skin.name; }
+      cd.stage.draw(cd.demo.sample(t).f);
+    }
+  }
+
+  function boot() {
+    VV = window.VoiceVisuals;
+    if (!VV) { $("cur").textContent = "Couldn't load the visuals"; return; }
+    fps = Math.max(10, Math.min(120, +(lsGet("vvFps") || 30) || 30));
+    buildCards(); paintSeg(); loadCurrent();
+    if (parentVV()) $("pvFull").hidden = false;
+    requestAnimationFrame(loop);
+    document.addEventListener("visibilitychange", function () { if (!document.hidden) loadCurrent(); });
+  }
+  fetch("version.json?t=" + Date.now(), { cache: "no-store" })
+    .then(function (r) { return r.ok ? r.json() : { version: "dev" }; }).catch(function () { return { version: "dev" }; })
+    .then(function (j) {
+      var s = document.createElement("script"); s.src = "voice-visuals.js?v=" + encodeURIComponent(j.version);
+      s.onload = boot; s.onerror = function () { $("cur").textContent = "Couldn't load the visuals"; };
+      document.head.appendChild(s);
+    });
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>HA Visualisations: overlay test</title>
+<style>body{margin:0;background:#0e1621;color:#eff4f9;font:15px system-ui;padding:20px}button{font:inherit;padding:8px 12px;margin-right:8px}</style></head>
+<body><h2>A fake Home Assistant dashboard</h2>
+<p>Mocks <code>hass</code> with one Assist satellite and a speaker on the same device, then plays a turn.
+  Nothing is configured, so this also tests auto-detection. <code>?skin=</code> picks a skin; <code>?wav=/path.wav</code> adds real reply audio.</p>
+<button onclick="runTurn(false)">Short reply</button><button onclick="runTurn(true)">Long reply (satellite idles early)</button>
+<script>
+var SAT = "assist_satellite.test_satellite", SPK = "media_player.test_speaker", q = new URLSearchParams(location.search);
+var RUN = { id: "r0", at: Date.now(), heard: "", reply: "" };
+window.__mockHass = {
+  states: {
+    "assist_satellite.test_satellite": { state: "idle" },
+    "media_player.test_speaker": { state: "idle" },
+    "input_select.voice_visual": { state: q.get("skin") || "Orb" }
+  },
+  entities: { "assist_satellite.test_satellite": { device_id: "dev1" }, "media_player.test_speaker": { device_id: "dev1" } },
+  connection: { sendMessagePromise: function (m) {
+    if (m.type === "assist_pipeline/pipeline/list") return Promise.resolve({ pipelines: [{ id: "p1" }] });
+    if (m.type === "assist_pipeline/pipeline_debug/list") return Promise.resolve({ pipeline_runs: [{ pipeline_run_id: RUN.id, timestamp: new Date(RUN.at).toISOString() }] });
+    if (m.type === "assist_pipeline/pipeline_debug/get") return Promise.resolve({ events: [
+      { type: "run-start", data: { satellite_id: SAT, tts_output: { url: q.get("wav") || "/no-audio.wav" } } },
+      { type: "stt-end", data: { stt_output: { text: RUN.heard } } },
+      { type: "tts-start", data: { tts_input: RUN.reply } },
+      { type: "tts-end", data: { tts_output: { url: q.get("wav") || "/no-audio.wav" } } } ] });
+    return Promise.reject("unknown");
+  } }
+};
+try { localStorage.setItem("vvDebug", "1"); } catch (e) {}
+function set(id, v) { window.__mockHass.states[id] = { state: v }; }
+var SHORT = "Of course. The porch light is on, and it will switch off again at eleven.";
+var LONG = "Here's the forecast. It stays dry this morning with sunny spells, then cloud builds from the west after lunch. " +
+  "Light rain is likely from about four, clearing by nine this evening. Tomorrow starts cold, around four degrees, " +
+  "but warms to fourteen by the afternoon with a gentle breeze. The weekend looks settled, so it's a good time for the garden.";
+window.runTurn = function (long) {
+  var text = long ? LONG : SHORT, speakMs = text.length / 15.7 * 1000;
+  setTimeout(function () { RUN = { id: "r" + Date.now(), at: Date.now(), heard: long ? "What's the weather going to do?" : "Turn on the porch light.", reply: text }; set(SAT, "listening"); }, 300);
+  setTimeout(function () { set(SAT, "processing"); }, 2500);
+  setTimeout(function () { set(SAT, "responding"); set(SPK, "playing"); }, 3200);
+  setTimeout(function () { set(SAT, "idle"); }, 3200 + speakMs * (long ? 0.7 : 1) + 300);   // long: the satellite claims idle early
+  setTimeout(function () { set(SPK, "idle"); }, 3200 + speakMs + 800);
+};
+</script>
+<script src="../dist/voice-visuals.js?v=otest"></script>
+</body></html>

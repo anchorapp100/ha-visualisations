@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>HA Visualisations: demo</title>
+<style>html,body{margin:0;background:#000;height:100%;overflow:hidden}#st{position:absolute;inset:0}#st .vv-stage{position:absolute;inset:0}
+#hud{position:fixed;right:6px;top:6px;z-index:9;font:12px monospace;color:#0f0;background:rgba(0,0,0,.6);padding:3px 6px}</style></head>
+<body><div id="st"></div><div id="hud"></div>
+<!-- Renders one skin with the built-in demo conversation.
+     ?skin=<id or name>  ?t=<seconds> (0.6-3.6 listening, 3.6-4.9 thinking, 4.9-14 responding)  ?run=0 (freeze at t)  ?hud=0 -->
+<script>window.__VV_NO_OVERLAY = true;</script>
+<script src="../dist/voice-visuals.js?v=demo"></script>
+<script>
+var q = new URLSearchParams(location.search), VV = window.VoiceVisuals;
+var stage = new VV.Stage(document.getElementById("st"), { skin: q.get("skin") || "orb", quality: +(q.get("q") || 1) });
+var demo = new VV.Demo(0), T0 = +(q.get("t") || 0), run = q.get("run") !== "0", hud = document.getElementById("hud");
+if (q.get("hud") === "0") hud.style.display = "none";
+function render(t) { var s = demo.sample(t); stage.draw(s.f); stage.text(s.status, s.user, s.reply); return s.state; }
+function warm(t1) { for (var t = Math.max(0, t1 - 4); t < t1; t += 1 / 30) render(t); return render(t1); }
+if (run) {
+  var start = performance.now() / 1000;
+  (function loop() { requestAnimationFrame(loop); var t = T0 + performance.now() / 1000 - start; hud.textContent = stage.skin.id + " " + render(t) + " t=" + t.toFixed(1); })();
+} else {
+  hud.textContent = stage.skin.id + " " + warm(T0) + " t=" + T0;
+  (function tickle() { requestAnimationFrame(tickle); hud.style.opacity = hud.style.opacity === "0.99" ? "1" : "0.99"; })();   // keeps frames coming for screenshots
+}
+</script></body></html>

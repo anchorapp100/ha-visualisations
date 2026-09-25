@@ -1,0 +1,11 @@
+{
+  "satellite": "",
+  "speaker": "",
+  "heardSensor": "",
+  "replySensor": "",
+  "roomLevelSensor": "",
+  "skinSelect": "input_select.voice_visual",
+  "skin": "Orb",
+  "assistantName": "Assist",
+  "dashboards": ""
+}

@@ -1,0 +1,8 @@
+# your own settings live in Home Assistant, not here
+/config.json
+# local test audio
+*.wav
+__pycache__/
+*.pyc
+node_modules/
+.DS_Store

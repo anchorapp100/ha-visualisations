@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>HA Visualisations: contact sheet</title>
+<style>html,body{margin:0;background:#0e1621;overflow:hidden}#off{position:absolute;left:-5000px;top:0;width:640px;height:360px}#off .vv-stage{position:absolute;inset:0}canvas{display:block}</style></head>
+<body><canvas id="sheet"></canvas><div id="off"></div>
+<!-- Draws every skin at a representative moment of the demo conversation into one image (used for the README). -->
+<script>window.__VV_NO_OVERLAY = true;</script>
+<script src="../dist/voice-visuals.js?v=sheet"></script>
+<script>
+var VV = window.VoiceVisuals, stage = new VV.Stage(document.getElementById("off"), { skin: "orb" });
+var picks = [["classic-vu", 2.2], ["aurora", 2.3], ["mercury", 1.9], ["ribbons", 7.6], ["galaxy", 7.4], ["halo", 2.3],
+             ["pulsar", 7.6], ["phosphor", 4.3], ["tesla", 7.7], ["orb", 7.7], ["digital-vu", 2.3], ["paint-splash", 7.7],
+             ["fireworks", 11.5], ["synthwave", 7.7], ["hal-9000", 7.7], ["mother", 2.3], ["light-cycles", 11.5], ["lcars", 7.7]];
+var CW = 480, CH = 270, LB = 40, COLS = 6, PAD = 12, ROWS = Math.ceil(picks.length / COLS);
+var sheet = document.getElementById("sheet"), g = sheet.getContext("2d");
+sheet.width = COLS * CW + (COLS + 1) * PAD; sheet.height = ROWS * (CH + LB) + (ROWS + 1) * PAD;
+g.fillStyle = "#0e1621"; g.fillRect(0, 0, sheet.width, sheet.height);
+picks.forEach(function (p, i) {
+  stage.setSkin(p[0]); var d = new VV.Demo(0), s;
+  for (var t = Math.max(0, p[1] - 4); t < p[1]; t += 1 / 30) { s = d.sample(t); stage.draw(s.f); }
+  s = d.sample(p[1]); stage.draw(s.f);
+  var x = PAD + (i % COLS) * (CW + PAD), y = PAD + ((i / COLS) | 0) * (CH + LB + PAD);
+  g.drawImage(stage.canvas, x, y, CW, CH);
+  g.fillStyle = "#eff4f9"; g.font = "700 17px Segoe UI, Roboto, sans-serif"; g.textBaseline = "middle"; g.fillText(stage.skin.name, x + 3, y + CH + 20);
+  g.fillStyle = "#8ea0b5"; g.font = "14px Segoe UI, Roboto, sans-serif"; g.textAlign = "right";
+  g.fillText({ listening: "listening", responding: "replying", processing: "thinking", idle: "idle" }[s.state], x + CW - 3, y + CH + 20);
+  g.textAlign = "left";
+});
+document.title = "sheet " + sheet.width + "x" + sheet.height;
+</script></body></html>
