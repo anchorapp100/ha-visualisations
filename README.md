@@ -93,9 +93,37 @@ Every setting is optional. Leave one out or empty to use the default.
 
 Serve the repository folder over HTTP (for example `python -m http.server`) and open those pages.
 
-## Credits
+## Tributes and credits
 
-HAL 9000, Mother, Light Cycles and LCARS are fan tributes to *2001: A Space Odyssey*, *Alien*, *Tron* and *Star Trek*. Pac-Man, Space Invaders, Defender and Asteroids are fan tributes to the arcade games of 1978 to 1981. Everything is drawn in code: the sprites, the maze, the rock shapes and the fonts are new drawings in the style of the era, with no artwork, fonts or sounds taken from the films or games. This project isn't affiliated with or endorsed by their owners, and the names belong to their respective owners.
+Eight of the visuals are fan tributes to the games and films that inspired them. Everything is drawn in code: the sprites, the maze, the rock outlines and the pixel and vector lettering are new drawings in the style of the originals. No artwork, fonts, sounds or code were taken from any of them.
+
+**Arcade games**
+
+| Visual | A tribute to |
+|---|---|
+| Space Invaders | *Space Invaders*, Taito, 1978, designed by Tomohiro Nishikado. |
+| Asteroids | *Asteroids*, Atari, 1979, designed by Lyle Rains and Ed Logg. |
+| Pac-Man | *Pac-Man*, Namco, 1980, designed by Toru Iwatani. The maze here is a new layout. |
+| Defender | *Defender*, Williams Electronics, 1981, designed by Eugene Jarvis with Larry DeMar, Sam Dicker and Paul Dussault. |
+
+**Films and television**
+
+| Visual | A tribute to |
+|---|---|
+| HAL 9000 | HAL in *2001: A Space Odyssey* (1968), by Stanley Kubrick and Arthur C. Clarke. |
+| Mother | MU/TH/UR 6000, the ship's computer in Ridley Scott's *Alien* (1979). |
+| Light Cycles | *Tron* (1982), written and directed by Steven Lisberger, with light cycles designed by Syd Mead. |
+| LCARS | The computer displays Michael Okuda designed for *Star Trek: The Next Generation* (1987). |
+
+**Other inspirations**
+
+- **Pulsar** redraws the stacked plot of radio pulses from PSR B1919+21, the first pulsar, discovered by Jocelyn Bell Burnell and Antony Hewish in 1967. Harold Craft plotted it for his 1970 thesis, and Peter Saville used it for the cover of Joy Division's *Unknown Pleasures* (1979).
+- **Tesla** is named for Nikola Tesla, whose experiments with high-frequency discharges in glass tubes led to the plasma globe.
+- **Paint Splash** was inspired by the paint animation in ASUS's OLED Care screensaver. The paint here is simulated from scratch.
+- The idea of a full-screen visual that follows the voice came from the Lens Flares effect in jxlarrea's [Voice Satellite](https://github.com/jxlarrea/voice-satellite-card-integration) integration for Home Assistant. That effect isn't included here.
+- The demo conversation is stored as loudness and spectrum measurements of speech made with [Piper](https://github.com/OHF-Voice/piper1-gpl) (the en_GB-alba voice). No audio is included.
+
+The names above are trademarks or titles of their respective owners. This project isn't affiliated with or endorsed by any of them.
 
 ## Licence
 
