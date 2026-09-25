@@ -1,13 +1,13 @@
 /* =====================================================================
  * HA Visualisations: audio-reactive visuals for Home Assistant voice assistants.
- *   A skin engine (shared audio analysis + renderer + bloom), eighteen skins,
+ *   A skin engine (shared audio analysis + renderer + bloom), twenty-two skins,
  *   a demo driver (analysed speech clips) and the Home Assistant overlay.
  *   Source: src/*.js, built by build.py. MIT licence.
  * ===================================================================== */
 (function () {
   "use strict";
   if (window.VoiceVisuals) return;
-  var VERSION = "20260925155640";
+  var VERSION = "20260925165148";
 
   var CFG = {
     satellite: "",                // the assist_satellite entity to follow; "" = the first one in Home Assistant
@@ -2135,6 +2135,918 @@ var VV_DEMO = {"user": {"frames": 136, "dur": 2.705, "b64": "AzkLICYAKzQ5LhYyMil
     }
   });
 
+  /* ---------- shared bits for the 1980s arcade skins: a 5x7 pixel font, pixel sprites, vector digits, CRT scanlines ----------
+     Sprites are original designs drawn in the style of the era, not copies of any game's artwork. */
+  var PIX_FONT = (function () {
+    var src = {                                          // 7 rows per glyph, 5 bits each (MSB = leftmost), as hex pairs
+      "0": "0E11131519110E", "1": "040C040404040E", "2": "0E11010204081F", "3": "1F02040201110E", "4": "02060A121F0202",
+      "5": "1F101E0101110E", "6": "0608101E11110E", "7": "1F010204080808", "8": "0E11110E11110E", "9": "0E11110F01020C",
+      "A": "0E1111111F1111", "B": "1E11111E11111E", "C": "0E11101010110E", "D": "1C12111111121C", "E": "1F10101E10101F",
+      "F": "1F10101E101010", "G": "0E11101711110F", "H": "1111111F111111", "I": "0E04040404040E", "J": "0702020202120C",
+      "K": "11121418141211", "L": "1010101010101F", "M": "111B1515111111", "N": "11111915131111", "O": "0E11111111110E",
+      "P": "1E11111E101010", "Q": "0E11111115120D", "R": "1E11111E141211", "S": "0F10100E01011E", "T": "1F040404040404",
+      "U": "1111111111110E", "V": "11111111110A04", "W": "1111111515150A", "X": "11110A040A1111", "Y": "1111110A040404",
+      "Z": "1F01020408101F", "!": "04040404040004", "-": "0000001F000000", "<": "02040810080402", ">": "08040201020408",
+      ":": "000C0C000C0C00", "=": "00001F001F0000", "?": "0E110102040004", ".": "00000000000C0C", " ": "00000000000000"
+    }, out = {};
+    for (var ch in src) {
+      var rows = [];
+      for (var i = 0; i < 7; i++) rows.push(parseInt(src[ch].substr(i * 2, 2), 16));
+      out[ch] = rows;
+    }
+    return out;
+  })();
+  // Text in the 5x7 font: px = size of one font pixel. align: "left" | "center" | "right". Returns the width drawn.
+  function pixText(g, text, x, y, px, color, align) {
+    text = String(text).toUpperCase();
+    var w = text.length * 6 * px - px, x0 = align === "center" ? x - w / 2 : align === "right" ? x - w : x, i, r, c;
+    g.fillStyle = color;
+    for (i = 0; i < text.length; i++) {
+      var gl = PIX_FONT[text[i]] || PIX_FONT[" "];
+      for (r = 0; r < 7; r++) { var bits = gl[r]; if (!bits) continue; for (c = 0; c < 5; c++) if (bits & (16 >> c)) g.fillRect(x0 + (i * 6 + c) * px, y + r * px, px, px); }
+    }
+    return w;
+  }
+  // A pixel sprite from rows of characters; pal maps a character to a colour (anything else is transparent)
+  function pixSprite(rows, pal, px) {
+    var h = rows.length, w = 0, i, j;
+    for (i = 0; i < h; i++) w = Math.max(w, rows[i].length);
+    var c = mkCanvas(w * px, h * px), g = c.getContext("2d");
+    for (i = 0; i < h; i++) for (j = 0; j < rows[i].length; j++) { var col = pal[rows[i][j]]; if (col) { g.fillStyle = col; g.fillRect(j * px, i * px, px, px); } }
+    return c;
+  }
+  // Vector digits (seven segments on a 4x6 cell), as drawn by vector-monitor games
+  var VSEG = { a: [0, 0, 4, 0], b: [4, 0, 4, 3], c: [4, 3, 4, 6], d: [0, 6, 4, 6], e: [0, 3, 0, 6], f: [0, 0, 0, 3], g: [0, 3, 4, 3] };
+  var VDIG = { "0": "abcdef", "1": "bc", "2": "abged", "3": "abgcd", "4": "fgbc", "5": "afgcd", "6": "afedcg", "7": "abc", "8": "abcdefg", "9": "abcfgd" };
+  function vecText(g, text, x, y, s) {                   // s = size of one grid step; strokes into the current path
+    text = String(text);
+    for (var i = 0; i < text.length; i++) {
+      var segs = VDIG[text[i]] || "", ox = x + i * 6 * s;
+      for (var k = 0; k < segs.length; k++) { var q = VSEG[segs[k]]; g.moveTo(ox + q[0] * s, y + q[1] * s); g.lineTo(ox + q[2] * s, y + q[3] * s); }
+    }
+    return text.length * 6 * s - 2 * s;
+  }
+  // CRT scanlines: a cached pattern laid over the frame
+  function scanlines(r, alpha) {
+    var S = r.S, W = r.w, H = r.h;
+    if (!S.__scan) {
+      var c = mkCanvas(W, H), g = c.getContext("2d"), step = Math.max(2, Math.round(3 * r.u));
+      g.fillStyle = "rgba(0,0,0,1)";
+      for (var y = 0; y < H; y += step) g.fillRect(0, y, W, Math.max(1, Math.round(step / 3)));
+      S.__scan = c;
+    }
+    var gg = r.ctx; gg.save(); gg.globalAlpha = alpha; gg.drawImage(S.__scan, 0, 0); gg.restore();
+  }
+
+  /* ---------- Pac-Man: a neon maze where you drive Pac-Man and the assistant's voice turns the ghosts blue ----------
+     Your syllables make Pac-Man chomp and dash through the maze eating dots, and the dots light up across the maze with the
+     spectrum of whoever is speaking. When the assistant answers, Pac-Man gets a power pellet: the ghosts turn blue, flash on
+     its syllables and get eaten (200, 400, 800, 1600). While it thinks, the ghosts scatter to their corners.
+     The maze is an original layout in the classic style (a corridor graph, mirrored), drawn once as double-line neon walls;
+     the characters are drawn as vectors every frame. */
+  var PAC_HI = 10000;
+  register({
+    id: "pac-man", name: "Pac-Man", layout: "left", text: "arcade", hiDpi: true,
+    blurb: "A neon maze. Your syllables make Pac-Man chomp and dash; when the assistant answers, the ghosts turn blue and flash with its voice.",
+    init: function (r) {
+      var S = r.S, W = r.w, H = r.h, i, k;
+      // ---- the maze: corridor rows [y, x1, x2] and columns [x, y1, y2] for the left half (x2 = 13.5 crosses the middle)
+      var HR = [[1, 1, 12], [5, 1, 13.5], [8, 1, 6], [8, 9, 12], [11, 9, 13.5], [14, 0, 9], [17, 9, 13.5], [20, 1, 12], [23, 1, 3],
+                [23, 6, 13.5], [26, 1, 6], [26, 9, 12], [29, 1, 13.5]];
+      var VC = [[1, 1, 8], [1, 20, 23], [1, 26, 29], [3, 23, 26], [6, 1, 26], [9, 5, 8], [9, 11, 20], [9, 23, 26], [12, 1, 5],
+                [12, 8, 11], [12, 20, 23], [12, 26, 29]];
+      var Hs = [], Vs = [];
+      HR.forEach(function (s) { if (s[2] === 13.5) Hs.push([s[0], s[1], 27 - s[1]]); else { Hs.push(s); Hs.push([s[0], 27 - s[2], 27 - s[1]]); } });
+      VC.forEach(function (s) { Vs.push(s); Vs.push([27 - s[0], s[1], s[2]]); });
+      var N = {}, nodes = [];
+      function node(x, y) { var key = x + "," + y; if (!N[key]) { N[key] = { id: nodes.length, x: x, y: y, e: [] }; nodes.push(N[key]); } return N[key]; }
+      Hs.forEach(function (s) { node(s[1], s[0]); node(s[2], s[0]); });
+      Vs.forEach(function (s) { node(s[0], s[1]); node(s[0], s[2]); });
+      Hs.forEach(function (h) { Vs.forEach(function (v) { if (v[0] >= h[1] && v[0] <= h[2] && h[0] >= v[1] && h[0] <= v[2]) node(v[0], h[0]); }); });
+      var edges = [];
+      function link(a, b, wrap) { var e = { a: a, b: b, len: wrap ? 3 : Math.abs(a.x - b.x) + Math.abs(a.y - b.y), wrap: !!wrap }; edges.push(e); a.e.push(e); b.e.push(e); }
+      Hs.forEach(function (h) {
+        var row = nodes.filter(function (n) { return n.y === h[0] && n.x >= h[1] && n.x <= h[2]; }).sort(function (a, b) { return a.x - b.x; });
+        for (i = 1; i < row.length; i++) link(row[i - 1], row[i]);
+      });
+      Vs.forEach(function (v) {
+        var col = nodes.filter(function (n) { return n.x === v[0] && n.y >= v[1] && n.y <= v[2]; }).sort(function (a, b) { return a.y - b.y; });
+        for (i = 1; i < col.length; i++) link(col[i - 1], col[i]);
+      });
+      link(N["0,14"], N["27,14"], true);                                      // the tunnel
+      S.N = N; S.edges = edges; S.R = rng(1980);
+      // ---- geometry: the maze fills the right of the screen; the transcript takes the left
+      var rx = W * 0.545, rw = W * 0.43, T = Math.min(rw / 28, H * 0.9 / 34);
+      S.T = T; S.ox = rx + (rw - 28 * T) / 2; S.oy = (H - 34 * T) / 2 + 2.3 * T;
+      function X(x) { return S.ox + (x + 0.5) * T; }
+      function Y(y) { return S.oy + (y + 0.5) * T; }
+      S.X = X; S.Y = Y;
+      // ---- walls: stroke every corridor wide in blue, then narrower in black -> double-line walls with round corners
+      function wallLayer(col) {
+        var c = mkCanvas(W, H), g = c.getContext("2d"), p = new Path2D(), lw = Math.max(1.4, 0.13 * T), cw = 1.72 * T;
+        g.fillStyle = "#000"; g.fillRect(0, 0, W, H);                         // opaque: this layer repaints the whole frame
+        Hs.forEach(function (h) { var x1 = h[1] === 0 ? -1.6 : h[1], x2 = h[2] === 27 ? 28.6 : h[2]; p.moveTo(X(x1), Y(h[0])); p.lineTo(X(x2), Y(h[0])); });
+        Vs.forEach(function (v) { p.moveTo(X(v[0]), Y(v[1])); p.lineTo(X(v[0]), Y(v[2])); });
+        g.lineCap = "round"; g.lineJoin = "round";
+        g.strokeStyle = col; g.lineWidth = lw;                                // the outer wall
+        roundRect(g, X(-0.85), Y(-0.85), 28.7 * T, 31.7 * T, 0.9 * T); g.stroke();
+        g.lineWidth = cw + 2 * lw; g.stroke(p);
+        g.strokeStyle = "#000"; g.lineWidth = cw; g.stroke(p);
+        g.fillStyle = "#000"; g.fillRect(X(-3), Y(14) - cw / 2, 3.2 * T, cw); g.fillRect(X(27.8), Y(14) - cw / 2, 3.2 * T, cw);   // tunnel mouths
+        g.strokeStyle = col; g.lineWidth = lw;                                // the ghost house, with its door
+        roundRect(g, X(10.1), Y(12.2), 6.8 * T, 3.6 * T, 0.35 * T); g.stroke();
+        roundRect(g, X(10.1) + 2 * lw, Y(12.2) + 2 * lw, 6.8 * T - 4 * lw, 3.6 * T - 4 * lw, 0.25 * T); g.stroke();
+        g.fillStyle = "#000"; g.fillRect(X(12.6), Y(12.2) - lw, 1.8 * T, 4 * lw);
+        g.fillStyle = "#ffb8de"; g.fillRect(X(12.6), Y(12.2) + 0.2 * lw, 1.8 * T, 1.6 * lw);
+        return c;
+      }
+      function glowOf(src) { var c = mkCanvas(W, H), g = c.getContext("2d"); g.filter = "blur(" + Math.max(1.5, 0.28 * T).toFixed(1) + "px)"; g.drawImage(src, 0, 0); g.filter = "none"; return c; }
+      S.bg = wallLayer("#2d3cff"); S.bgFlash = wallLayer("#e8ecff");
+      S.glow = glowOf(S.bg); S.glowFlash = glowOf(S.bgFlash);             // the neon glow is blurred once, not every frame
+      // ---- dots (none around the ghost house or in the tunnel) and the four power pellets
+      S.dots = []; S.dotAt = {};
+      function dot(x, y) {
+        var key = x + "," + y;
+        if (S.dotAt[key] || x < 1 || x > 26 || (y >= 10 && y <= 18 && x !== 6 && x !== 21)) return;
+        var d = { x: x, y: y, alive: true, big: (x === 1 || x === 26) && (y === 3 || y === 23) };
+        S.dotAt[key] = d; S.dots.push(d);
+      }
+      Hs.forEach(function (h) { for (k = Math.ceil(h[1]); k <= h[2]; k++) dot(k, h[0]); });
+      Vs.forEach(function (v) { for (k = v[1]; k <= v[2]; k++) dot(v[0], k); });
+      S.left = S.dots.length; S.score = 0; S.popups = []; S.flashUntil = 0; S.flashDone = 0; S.dying = 0; S.readyUntil = 0; S.power = false;
+      S.eatMul = 200; S.lastState = "";
+      // ---- characters
+      function onEdge(ax, ay, bx, by, d, fwd) {
+        var A = N[ax + "," + ay], B = N[bx + "," + by];
+        // d = distance from A; fwd = heading for B. An actor's d counts from the node it set out from.
+        for (var j = 0; j < A.e.length; j++) { var e = A.e[j]; if ((e.a === A && e.b === B) || (e.b === A && e.a === B)) return { e: e, fwd: (e.a === A) === fwd, d: fwd ? d : e.len - d }; }
+        return null;
+      }
+      S.onEdge = onEdge;
+      S.reset = function () {
+        var p = onEdge(12, 23, 15, 23, 1.5, true);
+        S.pac = { e: p.e, fwd: true, d: p.d, x: 13.5, y: 23, dx: 1, dy: 0, chomp: 0, dash: 0 };
+        var cols = [[255, 32, 32], [255, 184, 255], [40, 255, 255], [255, 184, 82]];
+        S.ghosts = cols.map(function (c, j) {
+          var gh = { col: c, i: j, mode: j === 0 ? "out" : "house", hx: [13.5, 11.5, 13.5, 15.5][j], hy: j === 0 ? 11 : 14, x: 0, y: 0, dx: -1, dy: 0,
+                     release: [0, 1.5, 4, 6.5][j], flash: 0, fright: false, e: null, fwd: true, d: 0, bob: j * 1.3 };
+          if (j === 0) { var q = onEdge(12, 11, 15, 11, 1.5, false); gh.e = q.e; gh.fwd = q.fwd; gh.d = q.d; }
+          gh.x = gh.hx; gh.y = gh.hy;
+          return gh;
+        });
+        S.born = -1;
+      };
+      S.reset();
+    },
+    draw: function (r, f) {
+      var S = r.S, W = r.w, H = r.h, t = f.t, dt = f.dt, st = f.state, lv = f.level, T = S.T, X = S.X, Y = S.Y, R = S.R, i, k;
+      var listen = st === "listening", reply = st === "responding", think = st === "processing";
+      if (S.born < 0) { S.born = t; S.readyUntil = t + 1.2; }
+      // ---- the assistant's turn = power mode
+      if (reply && !S.power) { S.power = true; S.eatMul = 200; S.ghosts.forEach(function (g) { if (g.mode !== "eyes") { g.fright = true; if (g.mode === "out") { g.fwd = !g.fwd; g.d = g.e.len - g.d; } } }); }
+      if (!reply && S.power) { S.power = false; S.ghosts.forEach(function (g) { g.fright = false; }); }
+      if (f.onset && reply) S.ghosts.forEach(function (g) { if (g.fright) g.flash = 1; });
+      var P = S.pac, frozen = t < S.readyUntil || S.dying || t < S.flashUntil;
+      function pos(a) {                                                      // an actor's tile position along its edge
+        var e = a.e, fr = a.d / e.len;
+        if (e.wrap) {                                                        // off one edge of the maze and in at the other
+          var left = a.fwd === (e.a.x === 0), x = left ? -a.d : 27 + a.d;
+          if (x < -1.5) x += 30; if (x > 28.5) x -= 30;
+          a.x = x; a.y = 14; a.dx = left ? -1 : 1; a.dy = 0; return;
+        }
+        var A = a.fwd ? e.a : e.b, B = a.fwd ? e.b : e.a;
+        a.x = A.x + (B.x - A.x) * fr; a.y = A.y + (B.y - A.y) * fr; a.dx = Math.sign(B.x - A.x); a.dy = Math.sign(B.y - A.y);
+      }
+      function advance(a, dist, choose) {
+        a.d += dist;
+        while (a.d >= a.e.len) {
+          var at = a.fwd ? a.e.b : a.e.a, left = a.d - a.e.len, from = a.e, opts = at.e.filter(function (e) { return e !== from; });
+          if (!opts.length) opts = at.e;
+          var ne = choose(at, opts, from);
+          a.e = ne; a.fwd = ne.a === at; a.d = left;
+        }
+        pos(a);
+      }
+      function far(e, at) { return e.a === at ? e.b : e.a; }
+      function dist2(ax, ay, bx, by) { var dx = ax - bx, dy = ay - by; return dx * dx + dy * dy; }
+      // ---- Pac-Man: dots ahead, keep away from hunting ghosts, chase blue ones
+      if (!frozen) {
+        P.dash = Math.max(0, P.dash - dt);
+        if (listen && f.onset) { P.dash = 0.35; P.chomp += 0.6; }
+        var spd = (listen ? 5.5 + 6 * lv : reply ? 7 + 3 * lv : think ? 4 : 5) * (P.dash > 0 ? 1.45 : 1);
+        advance(P, spd * dt, function (at, opts) {
+          var best = null, bs = -1e9;
+          opts.forEach(function (e) {
+            var to = far(e, at), sc = R() * 2, n = 0;
+            if (!e.wrap) for (k = 0; k <= e.len; k++) { var dd = S.dotAt[Math.round(at.x + Math.sign(to.x - at.x) * k) + "," + Math.round(at.y + Math.sign(to.y - at.y) * k)]; if (dd && dd.alive) n++; }
+            sc += n * 3;
+            S.ghosts.forEach(function (g) {
+              if (g.mode !== "out") return;
+              var d = Math.sqrt(dist2(to.x, to.y, g.x, g.y));
+              if (g.fright) sc += 40 / (1 + d); else if (d < 6) sc -= 90 / (1 + d);
+            });
+            if (sc > bs) { bs = sc; best = e; }
+          });
+          return best;
+        });
+        P.chomp += dt * spd * 1.6;
+        var key = Math.round(P.x) + "," + Math.round(P.y), dt0 = S.dotAt[key];
+        if (dt0 && dt0.alive && dist2(P.x, P.y, dt0.x, dt0.y) < 0.2) {
+          dt0.alive = false; S.left--; S.score += dt0.big ? 50 : 10;
+          if (!S.left) { S.flashUntil = t + 2.2; S.flashDone = t + 2.2; }
+        }
+      }
+      if (S.flashDone && t >= S.flashDone) { S.flashDone = 0; S.dots.forEach(function (d) { d.alive = true; }); S.left = S.dots.length; S.reset(); S.readyUntil = t + 1.2; }
+      // ---- ghosts: classic targeting (chase / scatter / frightened / eyes home)
+      var corners = [[25, -3], [2, -3], [27, 32], [0, 32]];
+      S.ghosts.forEach(function (g, j) {
+        g.flash = Math.max(0, g.flash - dt * 3);
+        if (frozen) return;
+        if (g.mode === "house") {                                           // bob in the house, then leave through the door
+          g.y = 14 + Math.sin((t + g.bob) * 5) * 0.35;
+          if (t - S.born > g.release) g.mode = "leaving";
+          return;
+        }
+        if (g.mode === "leaving") {
+          var sp = 3 * dt;
+          if (Math.abs(g.x - 13.5) > 0.05) g.x += Math.sign(13.5 - g.x) * Math.min(sp, Math.abs(13.5 - g.x));
+          else if (g.y > 11) g.y = Math.max(11, g.y - sp);
+          else { var q = S.onEdge(12, 11, 15, 11, 1.5, R() < 0.5); g.e = q.e; g.fwd = q.fwd; g.d = q.d; g.mode = "out"; g.fright = S.power; }
+          g.dx = 0; g.dy = -1;
+          return;
+        }
+        var speed = g.mode === "eyes" ? 11 : g.fright ? 3.4 : think ? 4.6 : 5.2 + (listen ? 1.2 * lv : 0);
+        var tx, ty;
+        if (g.mode === "eyes") { tx = 13.5; ty = 11; }
+        else if (think || st === "idle") { tx = corners[j][0]; ty = corners[j][1]; }
+        else if (j === 0) { tx = P.x; ty = P.y; }
+        else if (j === 1) { tx = P.x + 4 * P.dx; ty = P.y + 4 * P.dy; }
+        else if (j === 2) { tx = 2 * (P.x + 2 * P.dx) - S.ghosts[0].x; ty = 2 * (P.y + 2 * P.dy) - S.ghosts[0].y; }
+        else { if (dist2(g.x, g.y, P.x, P.y) > 64) { tx = P.x; ty = P.y; } else { tx = corners[3][0]; ty = corners[3][1]; } }
+        advance(g, speed * dt, function (at, opts) {
+          if (g.fright && g.mode === "out") return opts[(R() * opts.length) | 0];
+          var best = opts[0], bd = 1e9;
+          opts.forEach(function (e) { var to = far(e, at), d = e.wrap ? 1e6 : dist2(to.x, to.y, tx, ty); if (d < bd) { bd = d; best = e; } });
+          return best;
+        });
+        if (g.mode === "eyes" && Math.abs(g.y - 11) < 0.3 && Math.abs(g.x - 13.5) < 0.6) { g.mode = "leaving"; g.x = 13.5; g.y = 12.5; g.fright = false; }
+      });
+      // ---- meetings: eat a blue ghost, or lose a life to a hunting one
+      if (!frozen) S.ghosts.forEach(function (g) {
+        if (g.mode !== "out" || dist2(g.x, g.y, P.x, P.y) > 0.6) return;
+        if (g.fright) {
+          g.mode = "eyes"; g.fright = false; S.score += S.eatMul;
+          S.popups.push({ x: g.x, y: g.y, txt: String(S.eatMul), t: t }); S.eatMul = Math.min(1600, S.eatMul * 2);
+        } else if (!S.dying) S.dying = t;
+      });
+      if (S.dying && t - S.dying > 1.95) { S.dying = 0; S.reset(); S.readyUntil = t + 1.2; }
+      PAC_HI = Math.max(PAC_HI, S.score);
+      // ---- draw: walls, dots, characters, header
+      var g0 = r.ctx, fl = t < S.flashUntil && Math.floor((S.flashUntil - t) * 4) % 2 === 0;
+      g0.globalCompositeOperation = "source-over"; g0.globalAlpha = 1;
+      g0.drawImage(fl ? S.bgFlash : S.bg, 0, 0);
+      g0.globalCompositeOperation = "lighter"; g0.globalAlpha = clamp(0.55 + 0.6 * lv, 0, 1);   // the walls glow brighter with the voice
+      g0.drawImage(fl ? S.glowFlash : S.glow, 0, 0);
+      g0.globalCompositeOperation = "source-over"; g0.globalAlpha = 1;
+      var sc = r.buf("pacdyn", W, H), q = sc.getContext("2d");               // dots + characters, bloomed on their own
+      q.globalCompositeOperation = "source-over"; q.globalAlpha = 1; q.clearRect(0, 0, W, H);
+      var bands = f.bands, amp = 0.35 + 0.65 * lv, lvlPaths = [new Path2D(), new Path2D(), new Path2D(), new Path2D(), new Path2D()], ds = 0.24 * T;
+      var pelOn = Math.floor(t * 5) % 2 === 0 || reply;
+      for (i = 0; i < S.dots.length; i++) {
+        var d = S.dots[i];
+        if (!d.alive) continue;
+        var bv = clamp((bands[Math.min(31, (d.x / 27 * 31) | 0)] - 0.3) / 0.7, 0, 1) * amp, li = Math.min(4, (bv * 5) | 0);
+        if (d.big) {
+          if (!pelOn) continue;
+          var pr = T * (0.42 + 0.25 * lv + (reply ? 0.12 * Math.sin(t * 12) : 0));
+          q.fillStyle = "#ffcfc0"; q.beginPath(); q.arc(X(d.x), Y(d.y), pr, 0, TAU); q.fill();
+          continue;
+        }
+        var s2 = ds * (1 + 0.5 * bv);
+        lvlPaths[li].rect(X(d.x) - s2 / 2, Y(d.y) - s2 / 2, s2, s2);
+      }
+      for (k = 0; k < 5; k++) { q.fillStyle = rgba(mixc([255, 184, 174], [255, 255, 255], k / 5), 0.62 + k * 0.095); q.fill(lvlPaths[k]); }
+      // clip characters to the maze so the tunnel hides them
+      q.save(); q.beginPath(); q.rect(X(-0.5), Y(-1), 28 * T, 33 * T); q.clip();
+      S.ghosts.forEach(function (g) { if (!(S.dying && t - S.dying > 0.5)) drawGhost(q, X(g.x), Y(g.y), 0.82 * T, g, t); });
+      if (S.dying) drawPacDeath(q, X(P.x), Y(P.y), 0.8 * T, (t - S.dying) / 1.5);
+      else {
+        var mouth = 0.04 + 0.62 * Math.abs(Math.sin(P.chomp * 2.2)), ang = Math.atan2(P.dy, P.dx);
+        if (frozen && t < S.readyUntil) mouth = 0.5;
+        q.fillStyle = "#ffff2a"; q.beginPath(); q.moveTo(X(P.x), Y(P.y)); q.arc(X(P.x), Y(P.y), 0.8 * T * (1 + 0.06 * (P.dash > 0)), ang + mouth, ang + TAU - mouth); q.closePath(); q.fill();
+      }
+      q.restore();
+      g0.drawImage(sc, 0, 0);
+      r.bloom(sc, 0.45 + 0.45 * lv, 0.007, 2);
+      // text and lives go on after the glow so they stay crisp: popups, READY!, the header
+      var px = T * 0.12;
+      S.popups = S.popups.filter(function (p) { return t - p.t < 1.1; });
+      S.popups.forEach(function (p) { pixText(g0, p.txt, X(p.x), Y(p.y) - 3.5 * px, px, "#39e6ff", "center"); });
+      if (t < S.readyUntil) pixText(g0, "READY!", X(13.5), Y(17) - 3.5 * px, px, "#ffff2a", "center");
+      if (Math.floor(t * 3) % 2 === 0) pixText(g0, "1UP", X(3.5), Y(-2.6), px, "#fff", "center");
+      pixText(g0, String(S.score).padStart(2, "0"), X(5.5), Y(-1.6), px, "#fff", "right");
+      pixText(g0, "HIGH SCORE", X(13.5), Y(-2.6), px, "#fff", "center");
+      pixText(g0, String(PAC_HI), X(15.5), Y(-1.6), px, "#fff", "right");
+      for (k = 0; k < 2; k++) { var lx = X(1.5 + k * 2), ly = Y(31.1); g0.fillStyle = "#ffff2a"; g0.beginPath(); g0.moveTo(lx, ly); g0.arc(lx, ly, 0.62 * T, Math.PI + 0.6, Math.PI + TAU - 0.6); g0.closePath(); g0.fill(); }
+      scanlines(r, 0.1);
+
+      function drawGhost(q, x, y, s, g, t) {
+        var eyes = g.mode === "eyes", blue = g.fright, wht = blue && g.flash > 0.5;
+        if (!eyes) {
+          q.fillStyle = blue ? (wht ? "#e9e9ff" : "#2424ff") : rgba(g.col, 1);
+          q.beginPath(); q.arc(x, y - 0.12 * s, 0.9 * s, Math.PI, 0);
+          var base = y + 0.82 * s, n = 4, w = 1.8 * s / n, ph = Math.floor(t * 8 + g.i) % 2 ? 0.5 : 0;
+          q.lineTo(x + 0.9 * s, base);
+          for (var j = 0; j < n; j++) {
+            var xr = x + 0.9 * s - j * w;
+            q.lineTo(xr - (0.5 + ph * 0.5) * w * 0.5, base - 0.3 * s * (ph ? 1 : 0.6));
+            q.lineTo(xr - w, base);
+          }
+          q.closePath(); q.fill();
+        }
+        if (blue && !eyes) {                                               // frightened face
+          q.fillStyle = wht ? "#ff2020" : "#ffc8b8";
+          q.fillRect(x - 0.38 * s, y - 0.28 * s, 0.2 * s, 0.2 * s); q.fillRect(x + 0.18 * s, y - 0.28 * s, 0.2 * s, 0.2 * s);
+          q.beginPath(); for (var m = 0; m <= 6; m++) { var mx = x - 0.6 * s + m * 0.2 * s, my = y + 0.3 * s + (m % 2 ? -0.1 : 0.1) * s; if (m) q.lineTo(mx, my); else q.moveTo(mx, my); }
+          q.strokeStyle = q.fillStyle; q.lineWidth = Math.max(1, 0.1 * s); q.stroke();
+          return;
+        }
+        var ex = g.dx * 0.12 * s, ey = g.dy * 0.14 * s;
+        for (var ei = -1; ei <= 1; ei += 2) {
+          q.fillStyle = "#fff"; q.beginPath(); q.ellipse(x + ei * 0.34 * s + ex * 0.5, y - 0.2 * s + ey * 0.5, 0.24 * s, 0.3 * s, 0, 0, TAU); q.fill();
+          q.fillStyle = "#1f38ff"; q.beginPath(); q.arc(x + ei * 0.34 * s + ex * 1.4, y - 0.2 * s + ey * 1.4, 0.13 * s, 0, TAU); q.fill();
+        }
+      }
+      function drawPacDeath(q, x, y, rad, p) {
+        if (p < 1) { var m = 0.3 + (Math.PI - 0.3) * p, a = -Math.PI / 2; q.fillStyle = "#ffff2a"; q.beginPath(); q.moveTo(x, y); q.arc(x, y, rad, a + m, a + TAU - m); q.closePath(); q.fill(); }
+        else if (p < 1.25) {
+          q.strokeStyle = "#ffff2a"; q.lineWidth = Math.max(1, rad * 0.14); q.beginPath();
+          for (var j = 0; j < 8; j++) { var an = j * TAU / 8, r0 = rad * 0.3, r1 = rad * (0.6 + (p - 1) * 2); q.moveTo(x + Math.cos(an) * r0, y + Math.sin(an) * r0); q.lineTo(x + Math.cos(an) * r1, y + Math.sin(an) * r1); }
+          q.stroke();
+        }
+      }
+    }
+  });
+
+  /* ---------- Space Invaders: you are the cannon; the assistant's voice makes the invaders dance ----------
+     Your syllables make the cannon line up under the formation and fire. When the assistant answers, each column of invaders
+     bobs with its slice of the spectrum, the march speeds up with its voice and its syllables rain bombs on the bunkers
+     (which erode pixel by pixel); a UFO crosses on its loudest moments. The field is drawn at a low resolution, tinted by
+     the coloured strips of the old cabinet screens (red UFO lane, green bunkers and cannon), then scaled up crisp with a glow.
+     The invader, UFO and cannon sprites are original designs in the style of the era. */
+  var INV_HI = 5000;
+  register({
+    id: "space-invaders", name: "Space Invaders", layout: "top", text: "arcade", hiDpi: true,
+    blurb: "The cannon fires on your syllables; when the assistant answers, the invaders bob to its voice, march faster and drop bombs.",
+    init: function (r) {
+      var S = r.S, W = r.w, H = r.h, i, j;
+      S.VW = 340; S.VH = 200;
+      S.s = Math.min(W * 0.94 / S.VW, H * 0.6 / S.VH);
+      S.fx = Math.round((W - S.VW * S.s) / 2); S.fy = Math.round(H - S.VH * S.s - H * 0.015);
+      var WH = { "#": "#fff" };
+      S.types = [
+        { w: 8, pts: 30, f: [pixSprite(["..####..", ".######.", "##.##.##", "########", ".#.##.#.", "#.#..#.#", ".#....#.", "........"], WH, 1),
+                             pixSprite(["..####..", ".######.", "##.##.##", "########", ".##..##.", "#..##..#", "##....##", "........"], WH, 1)] },
+        { w: 11, pts: 20, f: [pixSprite(["...#...#...", "....#.#....", "..#######..", ".##.#.#.##.", "###########", ".#########.", ".#.#...#.#.", "#.#.....#.#"], WH, 1),
+                              pixSprite(["...#...#...", "#...#.#...#", "#.#######.#", "###.#.#.###", "###########", "..#######..", "..#.....#..", ".#.......#."], WH, 1)] },
+        { w: 12, pts: 10, f: [pixSprite(["....####....", "..########..", ".##########.", "##..####..##", "############", "..#.#..#.#..", ".#..#..#..#.", "#..#....#..#"], WH, 1),
+                              pixSprite(["....####....", "..########..", ".##########.", "##..####..##", "############", ".#..#..#..#.", "#..#....#..#", ".#........#."], WH, 1)] }
+      ];
+      S.rowType = [0, 1, 1, 2, 2];
+      S.cannonSpr = pixSprite(["......#......", ".....###.....", ".....###.....", ".###########.", "#############", "#############", "#############", "#############"], WH, 1);
+      S.ufoSpr = pixSprite([".....######.....", "...##########...", "..############..", ".##.##.##.##.##.", "################", "..###..##..###..", "...#........#..."], WH, 1);
+      S.boomSpr = pixSprite(["....#...#....", ".#...#.#...#.", "..#.......#..", "...#.....#...", "##.........##", "...#.....#...", "..#.#...#.#..", ".#...#.#...#."], WH, 1);
+      S.bombSpr = [pixSprite([".#.", "#..", ".#.", "..#", ".#.", "#..", ".#."], WH, 1), pixSprite([".#.", "..#", ".#.", "#..", ".#.", "..#", ".#."], WH, 1)];
+      S.R = rng(1978);
+      var R = S.R;
+      S.deadSpr = [0, 1].map(function () { var rows = []; for (var y = 0; y < 8; y++) { var s = ""; for (var x = 0; x < 15; x++) s += (y > 2 && R() < 0.2 + 0.1 * y) || (y > 5 && R() < 0.5) ? "#" : "."; rows.push(s); } return pixSprite(rows, WH, 1); });
+      // bunkers: an arch, kept as a pixel mask so hits can bite pieces out of it
+      var BK = ["....##############....", "...################...", "..##################..", ".####################.",
+                "######################", "######################", "######################", "######################",
+                "######################", "######################", "######################", "######################",
+                "######..........######", "######..........######", "#####............#####", "#####............#####"];
+      S.makeBunkers = function () {
+        S.bunkers = [];
+        for (i = 0; i < 4; i++) {
+          var bx = Math.round(S.VW * (0.2 + 0.2 * i) - 11), m = new Uint8Array(22 * 16), c = mkCanvas(22, 16);
+          for (j = 0; j < 16; j++) for (var x = 0; x < 22; x++) m[j * 22 + x] = BK[j][x] === "#" ? 1 : 0;
+          S.bunkers.push({ x: bx, y: 146, m: m, c: c, dirty: true });
+        }
+      };
+      S.newWave = function () {
+        S.alive = []; for (i = 0; i < 5; i++) { S.alive.push([]); for (j = 0; j < 11; j++) S.alive[i].push(true); }
+        S.ox = Math.round((S.VW - 176) / 2); S.oy = 44; S.dir = 1; S.frame = 0; S.stepAt = 0; S.waveAt = 0;
+        S.makeBunkers();
+      };
+      S.newWave();
+      S.score = 0; S.lives = 3; S.cx = S.VW / 2; S.deadUntil = 0; S.shots = []; S.bombs = []; S.boom = []; S.ufo = null; S.nextUfo = 12; S.lastUfo = -99; S.thump = 0;
+      // the backdrop: stars over a dim moonscape, drawn once
+      var bg = mkCanvas(W, H), g = bg.getContext("2d");
+      g.fillStyle = "#000"; g.fillRect(0, 0, W, H);
+      var vg = g.createRadialGradient(W / 2, H * 0.7, 0, W / 2, H * 0.7, W * 0.7);
+      vg.addColorStop(0, "rgba(20,30,70,0.35)"); vg.addColorStop(1, "rgba(0,0,0,0)"); g.fillStyle = vg; g.fillRect(0, 0, W, H);
+      for (i = 0; i < 170; i++) { var a = 0.15 + 0.6 * R() * R(); g.fillStyle = "rgba(210,220,255," + a.toFixed(2) + ")"; var sz = R() < 0.1 ? 2 : 1; g.fillRect(R() * W, R() * H * 0.85, sz * r.u * 1.4, sz * r.u * 1.4); }
+      g.fillStyle = "rgba(40,48,78,0.55)"; g.beginPath(); g.moveTo(0, H);
+      for (i = 0; i <= 40; i++) { var x = i / 40 * W, y = H * (0.9 + 0.03 * Math.sin(i * 0.9) + 0.02 * Math.sin(i * 2.3 + 1) + 0.015 * R()); g.lineTo(x, y); }
+      g.lineTo(W, H); g.closePath(); g.fill();
+      for (i = 0; i < 9; i++) { var cxr = R() * W, cyr = H * (0.94 + 0.04 * R()), rr = (8 + 26 * R()) * r.u; g.strokeStyle = "rgba(70,80,120,0.4)"; g.lineWidth = 1.2 * r.u; g.beginPath(); g.ellipse(cxr, cyr, rr, rr * 0.28, 0, 0, TAU); g.stroke(); }
+      S.bg = bg;
+    },
+    draw: function (r, f) {
+      var S = r.S, W = r.w, H = r.h, t = f.t, dt = f.dt, st = f.state, lv = f.level, R = S.R, VW = S.VW, i, j, k;
+      var listen = st === "listening", reply = st === "responding", think = st === "processing";
+      if (!S.stepAt) { S.stepAt = t; S.nextUfo = t + 10; }
+      // ---- the formation: where each invader is (the columns bob with the assistant's voice)
+      var bands = f.bands, bob = [], count = 0;
+      for (j = 0; j < 11; j++) bob.push(reply ? -Math.round(clamp((bands[3 + j * 2] - 0.3) / 0.7, 0, 1) * (3 + 7 * lv)) : 0);
+      function ax(row, col) { var ty = S.types[S.rowType[row]]; return S.ox + col * 16 + Math.floor((16 - ty.w) / 2); }
+      function ay(row, col) { return S.oy + row * 14 + bob[col]; }
+      var minX = 1e9, maxX = -1e9, maxY = -1e9;
+      for (i = 0; i < 5; i++) for (j = 0; j < 11; j++) if (S.alive[i][j]) {
+        count++; var x = ax(i, j), w = S.types[S.rowType[i]].w;
+        minX = Math.min(minX, x); maxX = Math.max(maxX, x + w); maxY = Math.max(maxY, S.oy + i * 14 + 8);
+      }
+      // ---- the march: faster as the formation thins, and faster still with the assistant's voice
+      var interval = (0.03 + 0.55 * count / 55) * (reply ? 1 / (1 + 1.8 * lv) : think ? 0.8 : listen ? 1 : 1.25);
+      if (count && t >= S.stepAt) {
+        S.stepAt = t + interval; S.frame ^= 1; S.thump = 1;
+        if ((S.dir > 0 && maxX + 3 > VW - 4) || (S.dir < 0 && minX - 3 < 4)) { S.oy += 6; S.dir = -S.dir; }
+        else S.ox += 3 * S.dir;
+      }
+      S.thump = Math.max(0, S.thump - dt * 6);
+      if ((!count && !S.waveAt) || maxY > 140) S.waveAt = t + (count ? 0.2 : 1.2);
+      if (S.waveAt && t >= S.waveAt) S.newWave();
+      // ---- the cannon: you
+      var alive = t >= S.deadUntil;
+      if (alive) {
+        var target = VW / 2;
+        if (listen || st === "idle") {
+          var bestD = 1e9;
+          for (j = 0; j < 11; j++) for (i = 4; i >= 0; i--) if (S.alive[i][j]) { var cxj = ax(i, j) + S.types[S.rowType[i]].w / 2, d = Math.abs(cxj - S.cx); if (d < bestD) { bestD = d; target = cxj; } break; }
+        }
+        var sp = (listen ? 60 + 140 * lv : 35) * dt;
+        S.cx += clamp(target - S.cx, -sp, sp);
+        var fire = (listen && f.onset) || (st === "idle" && R() < dt * 0.8);
+        if (fire && S.shots.length < 2) S.shots.push({ x: Math.round(S.cx), y: 170 });
+      }
+      // ---- the invaders' bombs: on the assistant's syllables, from the loudest column; now and then otherwise
+      var bombChance = reply ? (f.onset ? 1 : 0) : think || st === "idle" ? dt * 0.7 : dt * 0.35;
+      if (count && S.bombs.length < 5 && R() < bombChance) {
+        var col = 0, bv = -1;
+        for (j = 0; j < 11; j++) { var hasAny = false; for (i = 0; i < 5; i++) if (S.alive[i][j]) hasAny = true; var v = hasAny ? bands[3 + j * 2] + R() * 0.2 : -1; if (v > bv) { bv = v; col = j; } }
+        for (i = 4; i >= 0; i--) if (S.alive[i][col]) { S.bombs.push({ x: ax(i, col) + (S.types[S.rowType[i]].w >> 1) - 1, y: ay(i, col) + 8, ph: 0 }); break; }
+      }
+      // ---- the UFO: now and then, and on the assistant's loudest moments
+      if (!S.ufo && (t > S.nextUfo || (reply && f.onset && lv > 0.55 && t - S.lastUfo > 8))) {
+        var fromLeft = R() < 0.5; S.ufo = { x: fromLeft ? -16 : VW, dir: fromLeft ? 1 : -1 }; S.lastUfo = t; S.nextUfo = t + 16 + R() * 12;
+      }
+      if (S.ufo) { S.ufo.x += S.ufo.dir * 42 * dt; if (S.ufo.x < -20 || S.ufo.x > VW + 4) S.ufo = null; }
+      // ---- shots and bombs
+      function bunkerHit(x, y, up) {
+        for (var b = 0; b < S.bunkers.length; b++) {
+          var bk = S.bunkers[b], lx = Math.round(x - bk.x), ly = Math.round(y - bk.y);
+          if (lx < 0 || lx >= 22 || ly < 0 || ly >= 16 || !bk.m[ly * 22 + lx]) continue;
+          for (var e = 0; e < 14; e++) {                                   // bite a ragged chunk out of it
+            var ex = lx + Math.round((R() - 0.5) * 5), ey = ly + Math.round((R() - 0.5) * 5) + (up ? -1 : 1);
+            if (ex >= 0 && ex < 22 && ey >= 0 && ey < 16) bk.m[ey * 22 + ex] = 0;
+          }
+          bk.m[ly * 22 + lx] = 0; bk.dirty = true; return true;
+        }
+        return false;
+      }
+      S.shots = S.shots.filter(function (s) {
+        for (var n = 0; n < 4; n++) {                                        // sub-steps so nothing is skipped
+          s.y -= 230 * dt / 4;
+          if (s.y < 22) { S.boom.push({ x: s.x - 4, y: 22, t: t, spr: null }); return false; }
+          if (bunkerHit(s.x, s.y, true)) return false;
+          if (S.ufo && s.y < 34 && s.x >= S.ufo.x && s.x < S.ufo.x + 16) {
+            var pts = [50, 100, 150, 300][(R() * 4) | 0]; S.score += pts; S.boom.push({ x: S.ufo.x, y: 26, t: t, txt: String(pts), red: true }); S.ufo = null; return false;
+          }
+          for (var a = 0; a < 5; a++) for (var c = 0; c < 11; c++) {
+            if (!S.alive[a][c]) continue;
+            var ix = ax(a, c), iy = ay(a, c), tw = S.types[S.rowType[a]].w;
+            if (s.x >= ix && s.x < ix + tw && s.y >= iy && s.y < iy + 8) {
+              S.alive[a][c] = false; S.score += S.types[S.rowType[a]].pts; S.boom.push({ x: ix + tw / 2 - 6, y: iy, t: t, spr: S.boomSpr }); return false;
+            }
+          }
+        }
+        return true;
+      });
+      S.bombs = S.bombs.filter(function (b) {
+        for (var n = 0; n < 3; n++) {
+          b.y += 75 * dt / 3; b.ph += dt * 12 / 3;
+          if (bunkerHit(b.x + 1, b.y + 7, false)) return false;
+          if (alive && b.y + 7 >= 172 && b.y < 180 && b.x + 2 >= S.cx - 7 && b.x <= S.cx + 6) {
+            S.deadUntil = t + 1.2; S.lives = S.lives > 1 ? S.lives - 1 : 3; S.boom.push({ x: S.cx - 7, y: 172, t: t, dead: true }); return false;
+          }
+          if (b.y > 176) { S.boom.push({ x: b.x - 2, y: 178, t: t, small: true }); return false; }
+        }
+        return true;
+      });
+      INV_HI = Math.max(INV_HI, S.score);
+      // ---- draw the field at 1 px per unit
+      var fb = r.buf("invField", VW, S.VH), q = fb.getContext("2d");
+      q.globalCompositeOperation = "source-over"; q.clearRect(0, 0, VW, S.VH); q.imageSmoothingEnabled = false;
+      pixText(q, "SCORE<1>", 12, 2, 1, "#fff", "left"); pixText(q, "HI-SCORE", VW / 2, 2, 1, "#fff", "center"); pixText(q, "SCORE<2>", VW - 12, 2, 1, "#fff", "right");
+      pixText(q, String(S.score).padStart(4, "0"), 24, 12, 1, "#fff", "left"); pixText(q, String(INV_HI).padStart(4, "0"), VW / 2, 12, 1, "#fff", "center");
+      if (S.ufo) q.drawImage(S.ufoSpr, Math.round(S.ufo.x), 27);
+      for (i = 0; i < 5; i++) for (j = 0; j < 11; j++) if (S.alive[i][j]) q.drawImage(S.types[S.rowType[i]].f[S.frame], ax(i, j), ay(i, j));
+      S.bunkers.forEach(function (bk) {
+        if (bk.dirty) { var bc = bk.c.getContext("2d"), im = bc.createImageData(22, 16); for (var p = 0; p < 22 * 16; p++) if (bk.m[p]) { im.data[p * 4] = im.data[p * 4 + 1] = im.data[p * 4 + 2] = 255; im.data[p * 4 + 3] = 255; } bc.putImageData(im, 0, 0); bk.dirty = false; }
+        q.drawImage(bk.c, bk.x, bk.y);
+      });
+      q.fillStyle = "#fff";
+      S.shots.forEach(function (s) { q.fillRect(Math.round(s.x), Math.round(s.y), 1, 4); });
+      S.bombs.forEach(function (b) { q.drawImage(S.bombSpr[Math.floor(b.ph) % 2], Math.round(b.x), Math.round(b.y)); });
+      if (alive) q.drawImage(S.cannonSpr, Math.round(S.cx - 6), 172);
+      S.boom = S.boom.filter(function (e) {
+        var age = t - e.t;
+        if (e.dead) { if (age > 1.2) return false; q.drawImage(S.deadSpr[Math.floor(age * 10) % 2], Math.round(e.x), 172); return true; }
+        if (e.txt) { if (age > 1) return false; pixText(q, e.txt, e.x + 8, 27, 1, "#fff", "center"); return true; }
+        if (age > (e.small ? 0.15 : 0.28)) return false;
+        if (e.spr) q.drawImage(e.spr, Math.round(e.x), Math.round(e.y));
+        else { q.fillRect(Math.round(e.x) + 2, Math.round(e.y), 1, 1); q.fillRect(Math.round(e.x) + 4, Math.round(e.y) + 1, 1, 1); q.fillRect(Math.round(e.x) + 1, Math.round(e.y) + 2, 1, 1); q.fillRect(Math.round(e.x) + 5, Math.round(e.y) + 3, 1, 1); q.fillRect(Math.round(e.x) + 3, Math.round(e.y) + 2, 1, 1); }
+        return true;
+      });
+      q.globalAlpha = 0.75 + 0.25 * S.thump; q.fillRect(0, 183, VW, 1); q.globalAlpha = 1;   // the ground thumps with the march
+      pixText(q, String(S.lives), 12, 188, 1, "#fff", "left");
+      for (k = 0; k < S.lives - 1; k++) q.drawImage(S.cannonSpr, 26 + k * 16, 188);
+      pixText(q, "CREDIT 00", VW - 12, 188, 1, "#fff", "right");
+      // the cabinet's coloured strips
+      q.globalCompositeOperation = "source-atop";
+      q.fillStyle = "#ff3d3d"; q.fillRect(0, 22, VW, 16);
+      q.fillStyle = "#3dff6a"; q.fillRect(0, 138, VW, 48); q.fillRect(0, 186, 90, 14);
+      q.globalCompositeOperation = "source-over";
+      // ---- to the screen: backdrop, the field scaled up crisp, glow, scanlines
+      var g0 = r.ctx, s = S.s;
+      g0.globalCompositeOperation = "source-over"; g0.globalAlpha = 1; g0.drawImage(S.bg, 0, 0);
+      var sc = r.buf("invScaled", W, H), qq = sc.getContext("2d");
+      qq.clearRect(0, 0, W, H); qq.imageSmoothingEnabled = false; qq.drawImage(fb, S.fx, S.fy, VW * s, S.VH * s);
+      g0.drawImage(sc, 0, 0);
+      r.bloom(sc, 0.55 + 0.5 * lv, 0.006, 2);
+      scanlines(r, 0.14);
+    }
+  });
+
+  /* ---------- Defender: a side-scrolling planet where the mountains are your voices ----------
+     The ship flies right over a jagged planet surface generated from whoever is speaking, so the conversation scrolls past as
+     a mountain range. Your syllables thrust the ship on and fire its rainbow laser at landers, mutants and baiters, which burst
+     into rings of pixels. When the assistant answers, its syllables send landers down to snatch humanoids (one that reaches the
+     top becomes a mutant), and its loudest moments set off a smart bomb. The top panel carries the scanner (a radar of the
+     neighbourhood), the score, ships and smart bombs. Sprites are original designs in the style of the era. */
+  register({
+    id: "defender", name: "Defender", layout: "bottom", text: "arcade", hiDpi: true,
+    blurb: "A scrolling planet whose mountains are your voices. Your syllables fire the laser; the assistant's voice sends landers after the humanoids.",
+    init: function (r) {
+      var S = r.S, W = r.w, H = r.h, u = r.u, i;
+      var p = S.p = Math.max(2, Math.round(3 * u));
+      S.top = H * 0.17; S.base = H * 0.68; S.R = rng(1981);
+      var PAL = { w: "#ffffff", p: "#b060ff", y: "#ffe040", r: "#ff4040", g: "#40ff60", m: "#ff40ff", b: "#c050ff", h: "#ffffff", c: "#60e0ff" };
+      S.ship = pixSprite(["...ww...........", "..wwwp..........", "pwwwwwwwwwwyy...", "wwwwwwwwwwwwwwww", "pwwwwwwwwww.....", ".pp............."], PAL, p);
+      S.kinds = {
+        lander: { spr: pixSprite(["...ggg...", "..ggggg..", ".gg.g.gg.", "ggggggggg", ".gyyyyyg.", "..y.y.y..", ".y..y..y.", "y...y...y"], PAL, p), col: [64, 255, 96], pts: 150 },
+        mutant: { spr: pixSprite(["..mmmmm..", ".mgmgmgm.", "mmmmmmmmm", "m.m.m.m.m", ".mmmmmmm.", "..g...g..", ".g.g.g.g.", "g...g...g"], PAL, p), col: [255, 64, 255], pts: 150 },
+        baiter: { spr: pixSprite(["..ggggggggg..", "ggggggggggggg", ".g.g.g.g.g.g.", "..ggggggggg.."], PAL, p), col: [96, 255, 96], pts: 200 }
+      };
+      S.human = pixSprite([".h.", "hhh", ".b.", "bbb", ".b.", ".b.", "b.b", "b.b"], PAL, p);
+      S.cam = 0; S.shipY = 0.45; S.terr = []; S.stepW = 7 * p; S.enemies = []; S.humans = []; S.parts = []; S.lasers = [];
+      S.score = 0; S.lives = 3; S.bombs = 3; S.flash = 0; S.lastBomb = -99; S.nextHuman = 0;
+      S.stars = []; for (i = 0; i < 110; i++) S.stars.push({ x: S.R() * W, y: S.top + S.R() * (S.base - S.top) * 0.95, d: 0.15 + S.R() * 0.5, c: [[255, 255, 255], [255, 120, 120], [120, 200, 255], [255, 240, 120]][(S.R() * 4) | 0], ph: S.R() * TAU });
+    },
+    draw: function (r, f) {
+      var S = r.S, W = r.w, H = r.h, u = r.u, t = f.t, dt = f.dt, st = f.state, lv = f.level, R = S.R, p = S.p, i, k;
+      var listen = st === "listening", reply = st === "responding", think = st === "processing";
+      var top = S.top, base = S.base, span = base - top;
+      // ---- flight: your voice is thrust; the camera follows the ship, which sits a third of the way across
+      var speed = W * (listen ? 0.25 + 1.1 * lv : reply ? 0.3 : think ? 0.16 : 0.22);
+      S.cam += speed * dt;
+      var shipX = S.cam + W * 0.3;
+      // ---- terrain: new ground appears ahead, its height taken from whoever is speaking right now
+      var sw = S.stepW;
+      if (!S.terr.length) for (var x0 = S.cam - W * 1.6; x0 < S.cam + W * 2.6; x0 += sw) S.terr.push({ x: x0, h: 0.06 + 0.05 * noise1(x0 * 0.004) + 0.03 * R() });
+      while (S.terr[S.terr.length - 1].x < S.cam + W * 2.6) {                // plain ground far ahead (the scanner shows it)...
+        var lx = S.terr[S.terr.length - 1].x + sw;
+        S.terr.push({ x: lx, h: clamp(0.06 + 0.05 * noise1(lx * 0.004) + 0.035 * (R() - 0.3), 0.02, 0.2) });
+      }
+      var voiced = (listen || reply) ? f.voice * (0.18 + 0.22 * lv) + 0.12 * f.level : 0;
+      for (i = S.terr.length - 1; i >= 0 && S.terr[i].x > S.cam + W * 0.98; i--) {   // ...raised by the voice as it comes on screen
+        var s0 = S.terr[i];
+        if (!s0.v && s0.x < S.cam + W * 1.04) { s0.v = true; s0.h = clamp(s0.h + voiced, 0.02, 0.42); }
+      }
+      while (S.terr.length && S.terr[0].x < S.cam - W * 1.7) S.terr.shift();
+      function groundAt(wx) {
+        var i0 = Math.floor((wx - S.terr[0].x) / sw); i0 = clamp(i0, 0, S.terr.length - 2);
+        var a = S.terr[i0], b = S.terr[i0 + 1], fr = clamp((wx - a.x) / sw, 0, 1);
+        return a.h + (b.h - a.h) * fr;
+      }
+      // ---- humanoids stand on the ground every so often; enemies are topped up ahead of the ship
+      if (!S.nextHuman) S.nextHuman = S.cam;
+      while (S.nextHuman < S.cam + W * 2.4) { S.humans.push({ x: S.nextHuman + R() * W * 0.3, y: 0, held: null, fall: 0 }); S.nextHuman += W * (0.45 + 0.4 * R()); }
+      S.humans = S.humans.filter(function (h) { return h.x > S.cam - W * 1.7; });
+      S.humans.forEach(function (h) { if (!h.held) { var gy = 1 - groundAt(h.x); if (h.fall) { h.y += h.fall * dt; h.fall += 1.2 * dt; if (h.y >= gy) { h.y = gy; h.fall = 0; } } else h.y = gy; } });
+      var ahead = S.enemies.filter(function (e) { return e.x > S.cam - W * 0.2 && e.x < S.cam + W * 2.4; }).length;
+      while (ahead < 9) {
+        var kind = R() < 0.62 ? "lander" : R() < 0.6 ? "mutant" : "baiter";
+        S.enemies.push({ kind: kind, x: S.cam + W * (1.05 + 1.3 * R()), y: 0.1 + 0.5 * R(), vx: (R() - 0.5) * 0.08, ph: R() * TAU, grab: null, target: null }); ahead++;
+      }
+      S.enemies = S.enemies.filter(function (e) { return e.x > S.cam - W * 1.7; });
+      // ---- the assistant's syllables send a lander after a humanoid; its loudest moment is a smart bomb
+      if (reply && f.onset) {
+        var cands = S.enemies.filter(function (e) { return e.kind === "lander" && !e.grab && !e.target && e.x > S.cam && e.x < S.cam + W; });
+        if (cands.length) {
+          var en = cands[(R() * cands.length) | 0], best = null, bd = 1e9;
+          S.humans.forEach(function (h) { if (!h.held && !h.fall) { var d = Math.abs(h.x - en.x); if (d < bd) { bd = d; best = h; } } });
+          if (best && bd < W * 0.6) en.target = best;
+        }
+        if (lv > 0.62 && t - S.lastBomb > 7 && S.bombs > 0) {
+          S.lastBomb = t; S.flash = 1; S.bombs--; if (!S.bombs) S.bombs = 3;
+          S.enemies.forEach(function (e) { if (e.x > S.cam && e.x < S.cam + W) kill(e); });
+        }
+      }
+      var bands = f.bands;
+      S.enemies.forEach(function (e, n) {
+        if (e.dead) return;
+        var wob = reply ? clamp((bands[(n * 5) % 32] - 0.3) / 0.7, 0, 1) * lv : 0;
+        if (e.target) {                                                      // swoop down, grab, climb
+          var h = e.target;
+          if (!e.grab) {
+            e.x += clamp(h.x - e.x, -W * 0.25 * dt, W * 0.25 * dt); e.y += clamp(h.y - 0.07 - e.y, -0.35 * dt, 0.35 * dt);
+            if (Math.abs(h.x - e.x) < 4 * p && Math.abs(h.y - 0.07 - e.y) < 0.02) { e.grab = h; h.held = e; }
+          } else {
+            e.y -= 0.12 * dt; h.x = e.x; h.y = e.y + 0.075;
+            if (e.y < 0.02) { e.kind = "mutant"; e.target = null; e.grab = null; h.dead = true; }
+          }
+        } else if (e.kind === "mutant") {
+          e.y += clamp(S.shipY - e.y, -0.2 * dt, 0.2 * dt) + (R() - 0.5) * 0.02; e.x += (R() - 0.5) * W * 0.02;
+        } else if (e.kind === "baiter") {
+          e.x += W * (0.06 + 0.25 * wob) * dt * (e.ph > Math.PI ? 1 : -1); e.y = clamp(e.y + Math.sin(t * 2 + e.ph) * 0.1 * dt, 0.05, 0.7);
+        } else {
+          e.x += e.vx * W * dt; e.y = clamp(e.y + Math.sin(t * 1.5 + e.ph) * (0.03 + 0.2 * wob) * dt, 0.04, 0.72);
+        }
+        e.bob = wob;
+      });
+      S.humans = S.humans.filter(function (h) { return !h.dead; });
+      // ---- the ship steers toward the nearest enemy ahead; your syllables fire the laser
+      var aim = null, ad = 1e9;
+      S.enemies.forEach(function (e) { if (!e.dead && e.x > shipX && e.x < S.cam + W) { var d = e.x - shipX; if (d < ad) { ad = d; aim = e; } } });
+      S.shipY = follow(S.shipY, aim ? aim.y : 0.4 + 0.1 * Math.sin(t * 0.7), 0.06 + 0.1 * lv, 0.06 + 0.1 * lv, dt);
+      if ((listen && f.onset) || (st === "idle" && R() < dt * 0.6)) {
+        var hit = null, hd = 1e9, tol = 0.07;
+        S.enemies.forEach(function (e) { if (!e.dead && e.x > shipX && e.x < S.cam + W && Math.abs(e.y - S.shipY) < tol) { var d = e.x - shipX; if (d < hd) { hd = d; hit = e; } } });
+        S.lasers.push({ x: shipX + 16 * p, y: S.shipY, t: t, to: hit ? hit.x : S.cam + W * 1.05 });
+        if (hit) kill(hit);
+      }
+      function kill(e) {
+        if (e.dead) return;
+        e.dead = true; S.score += S.kinds[e.kind].pts;
+        if (e.grab) { e.grab.held = null; e.grab.fall = 0.05; }
+        if (e.target) e.target = null;
+        var c = S.kinds[e.kind].col;
+        for (var j = 0; j < 20; j++) { var an = j / 20 * TAU; S.parts.push({ x: e.x, y: e.y, vx: Math.cos(an) * (0.9 + 0.3 * (j % 2)), vy: Math.sin(an) * (0.9 + 0.3 * (j % 2)), t: t, c: j % 3 ? c : [255, 255, 255] }); }
+      }
+      S.enemies = S.enemies.filter(function (e) { return !e.dead; });
+      // ---- draw
+      var g0 = r.ctx; g0.globalCompositeOperation = "source-over"; g0.globalAlpha = 1; g0.fillStyle = "#000"; g0.fillRect(0, 0, W, H);
+      var sc = r.buf("defScene", W, H), q = sc.getContext("2d");
+      q.globalCompositeOperation = "source-over"; q.clearRect(0, 0, W, H); q.imageSmoothingEnabled = false;
+      function SX(wx) { return wx - S.cam; }
+      function SY(y) { return top + y * span; }
+      S.stars.forEach(function (s) {                                         // parallax stars
+        var x = ((s.x - S.cam * s.d) % W + W) % W, a = 0.35 + 0.35 * Math.sin(t * 2 + s.ph);
+        q.fillStyle = rgba(s.c, a); q.fillRect(x, s.y, p * 0.8, p * 0.8);
+      });
+      q.beginPath();                                                        // the planet surface
+      var first = true;
+      S.terr.forEach(function (s) { var x = SX(s.x); if (x < -sw || x > W + sw) return; var y = base - s.h * span; if (first) { q.moveTo(x, y); first = false; } else q.lineTo(x, y); });
+      q.strokeStyle = "#d8722a"; q.lineWidth = Math.max(1.5, 0.7 * p); q.lineJoin = "miter"; q.stroke();
+      S.humans.forEach(function (h) { var x = SX(h.x); if (x > -10 && x < W + 10) q.drawImage(S.human, Math.round(x - 1.5 * p), Math.round(SY(h.y) - 8 * p)); });
+      S.enemies.forEach(function (e) {
+        var x = SX(e.x); if (x < -20 * p || x > W + 20 * p) return;
+        var spr = S.kinds[e.kind].spr, s2 = 1 + 0.35 * (e.bob || 0);
+        q.drawImage(spr, Math.round(x - spr.width * s2 / 2), Math.round(SY(e.y) - spr.height * s2 / 2), spr.width * s2, spr.height * s2);
+      });
+      // lasers: a white head racing out with a rainbow tail behind it
+      var RB = [[255, 60, 60], [255, 200, 40], [80, 255, 90], [60, 220, 255], [110, 110, 255], [255, 80, 255]];
+      S.lasers = S.lasers.filter(function (L) {
+        var age = t - L.t; if (age > 0.3) return false;
+        var x0 = SX(L.x), x1 = SX(L.to), reach = Math.min(1, age / 0.08), head = x0 + (x1 - x0) * reach, y = Math.round(SY(L.y)), seg = 10 * p, fade = 1 - Math.max(0, age - 0.12) / 0.18;
+        for (var xx = x0, n = 0; xx < head; xx += seg, n++) { q.fillStyle = rgba(RB[(n + Math.floor(t * 30)) % RB.length], 0.9 * fade); q.fillRect(xx, y, Math.min(seg, head - xx), Math.max(1, 0.6 * p)); }
+        q.fillStyle = rgba([255, 255, 255], fade); q.fillRect(head - 3 * p, y - 0.2 * p, 3 * p, Math.max(1, p));
+        return true;
+      });
+      S.parts = S.parts.filter(function (pt) {                               // rings of pixels flying apart
+        var age = t - pt.t; if (age > 0.9) return false;
+        var x = SX(pt.x) + pt.vx * age * W * 0.12, y = SY(pt.y) + pt.vy * age * W * 0.12;
+        q.fillStyle = rgba(pt.c, 1 - age / 0.9); q.fillRect(x, y, p * 1.2, p * 1.2);
+        return true;
+      });
+      // the ship, with a flickering exhaust while it thrusts
+      var sx = SX(shipX), sy = Math.round(SY(S.shipY) - S.ship.height / 2), thr = listen ? 0.3 + lv : 0.25;
+      for (k = 0; k < 4; k++) { var fl = (2 + 6 * thr * (0.6 + 0.4 * R())) * p; q.fillStyle = rgba(RB[(k + Math.floor(t * 20)) % 4], 0.85); q.fillRect(sx - fl - k * 0.5 * p, sy + 2 * p + (k % 2) * p, fl, p); }
+      q.drawImage(S.ship, Math.round(sx), sy);
+      // ---- the top panel: scanner, score, ships, smart bombs
+      var px0 = W * 0.28, pw = W * 0.44, py0 = H * 0.02, ph = H * 0.115, win0 = S.cam - W * 1.5, winW = W * 4;
+      function MX(wx) { return px0 + (wx - win0) / winW * pw; }
+      q.fillStyle = "rgba(216,114,42,0.8)";
+      S.terr.forEach(function (s, n) { if (n % 3) return; var x = MX(s.x); if (x >= px0 && x <= px0 + pw) q.fillRect(x, py0 + ph - 2 - s.h * ph * 0.8, 1.5, 1.5); });
+      S.enemies.forEach(function (e) { var x = MX(e.x); if (x >= px0 && x <= px0 + pw) { q.fillStyle = rgba(S.kinds[e.kind].col, 1); q.fillRect(x - 1.5, py0 + 3 + e.y * (ph - 8), 3, 3); } });
+      S.humans.forEach(function (h) { var x = MX(h.x); if (x >= px0 && x <= px0 + pw) { q.fillStyle = "#c050ff"; q.fillRect(x - 1, py0 + 3 + h.y * (ph - 8), 2, 3); } });
+      q.fillStyle = "#fff"; q.fillRect(MX(shipX) - 2.5, py0 + 3 + S.shipY * (ph - 8), 5, 3);
+      if (think) { var sweep = px0 + ((t * 0.5) % 1) * pw; q.fillStyle = "rgba(120,160,255,0.35)"; q.fillRect(sweep, py0, 2, ph); }
+      pixText(q, String(S.score).padStart(6, "0"), W * 0.235, H * 0.035, Math.max(2, 0.55 * p), "#fff", "right");
+      for (k = 0; k < S.lives; k++) q.drawImage(S.ship, W * 0.1 + k * 7 * p, H * 0.085, S.ship.width * 0.4, S.ship.height * 0.4);
+      for (k = 0; k < S.bombs; k++) { q.fillStyle = "#ffe040"; q.fillRect(W * 0.235 - 2 * p, H * 0.085 + k * 1.6 * p, 2 * p, p); }
+      g0.drawImage(sc, 0, 0);
+      r.bloom(sc, 0.5 + 0.5 * lv, 0.006, 2);
+      // panel frame, crisp over the glow
+      g0.strokeStyle = "#3a54ff"; g0.lineWidth = Math.max(1.5, 0.5 * p);
+      g0.beginPath(); g0.moveTo(0, top - 3 * p); g0.lineTo(W, top - 3 * p); g0.stroke();
+      g0.strokeRect(px0 - 2, py0 - 2, pw + 4, ph + 4);
+      var vx0 = MX(S.cam), vx1 = MX(S.cam + W), bl = 5 * p;               // brackets: the part of the scanner on screen
+      g0.strokeStyle = "#fff"; g0.beginPath();
+      g0.moveTo(vx0, py0 + bl); g0.lineTo(vx0, py0); g0.lineTo(vx0 + bl, py0); g0.moveTo(vx1 - bl, py0); g0.lineTo(vx1, py0); g0.lineTo(vx1, py0 + bl);
+      g0.moveTo(vx0, py0 + ph - bl); g0.lineTo(vx0, py0 + ph); g0.lineTo(vx0 + bl, py0 + ph); g0.moveTo(vx1 - bl, py0 + ph); g0.lineTo(vx1, py0 + ph); g0.lineTo(vx1, py0 + ph - bl);
+      g0.stroke();
+      if (S.flash > 0) { g0.fillStyle = "rgba(255,255,255," + (0.85 * S.flash).toFixed(3) + ")"; g0.fillRect(0, 0, W, H); S.flash = Math.max(0, S.flash - dt * 5); }
+      scanlines(r, 0.12);
+    }
+  });
+
+  /* ---------- Asteroids: a vector-monitor rock field where your syllables are the ship's shots ----------
+     Everything is drawn as glowing white vector lines with bright vertex dots and phosphor afterglow. Your syllables turn the
+     ship onto the nearest rock and fire; rocks split large, medium, small. When the assistant answers, the beam throbs,
+     every rock's outline ripples with its slice of the spectrum, the ship returns fire on some of its syllables and a
+     saucer turns up to shoot back on others. While it thinks, the ship
+     drifts and hops through hyperspace. The play area wraps like the original; the rock outlines are generated. */
+  var AST_HI = 20000;
+  register({
+    id: "asteroids", name: "Asteroids", layout: "bottom", text: "vector", hiDpi: true,
+    blurb: "A glowing vector rock field. Your syllables aim and fire; while the assistant answers, the beam throbs, the rocks ripple with its voice and a saucer joins the fight.",
+    init: function (r) {
+      var S = r.S, W = r.w, H = r.h, i, k;
+      S.AW = W; S.AH = H * 0.7; S.s = Math.min(W, S.AH * 1.6) / 1000; S.R = rng(1979);
+      var R = S.R;
+      S.tpl = [];                                                           // four jagged rock outlines, radius ~1
+      for (k = 0; k < 4; k++) { var pts = []; for (i = 0; i < 11; i++) { var a = i / 11 * TAU + (R() - 0.5) * 0.35, rr = 0.72 + 0.28 * R(); pts.push([Math.cos(a) * rr, Math.sin(a) * rr]); } S.tpl.push(pts); }
+      S.rocks = []; S.shots = []; S.eshots = []; S.parts = []; S.debris = []; S.wave = 0; S.waveAt = 0.01;
+      S.ship = { x: W / 2, y: S.AH / 2, a: -Math.PI / 2, vx: 0, vy: 0, dead: 0, hyper: 0, thrust: 0 };
+      S.saucer = null; S.lastSaucer = -99; S.nextHyper = 0; S.score = 0; S.lives = 3; S.n = 0;
+    },
+    draw: function (r, f) {
+      var S = r.S, W = r.w, H = r.h, t = f.t, dt = f.dt, st = f.state, lv = f.level, R = S.R, AW = S.AW, AH = S.AH, s = S.s, i, k;
+      var listen = st === "listening", reply = st === "responding", think = st === "processing", sh = S.ship;
+      function wrap(o) { o.x = (o.x % AW + AW) % AW; o.y = (o.y % AH + AH) % AH; }
+      function wd(ax, ay, bx, by) { var dx = bx - ax, dy = by - ay; dx -= Math.round(dx / AW) * AW; dy -= Math.round(dy / AH) * AH; return [dx, dy]; }
+      function rock(x, y, size, vx, vy) { S.rocks.push({ x: x, y: y, size: size, rad: [70, 35, 17][size] * s, vx: vx, vy: vy, tpl: (R() * 4) | 0, id: S.n++ }); }
+      // ---- waves of big rocks, arriving from the edges
+      if (S.waveAt && t >= S.waveAt) {
+        S.waveAt = 0; S.wave++;
+        for (i = 0; i < Math.min(8, 4 + S.wave); i++) {
+          var edge = R() < 0.5, x = edge ? R() * AW : 0, y = edge ? 0 : R() * AH, an = R() * TAU, v = (40 + 35 * R()) * s;
+          rock(x, y, 0, Math.cos(an) * v, Math.sin(an) * v);
+        }
+      }
+      if (!S.rocks.length && !S.waveAt) S.waveAt = t + 1.5;
+      var spdMul = 1 + (reply ? 0.6 * lv : 0);
+      S.rocks.forEach(function (o) { o.x += o.vx * dt * spdMul; o.y += o.vy * dt * spdMul; wrap(o); });
+      // ---- the ship: aim at the nearest rock (leading it), fire on your syllables; drift and hyperspace while thinking
+      var alive = !sh.dead && !sh.hyper;
+      if (sh.dead && t - sh.dead > 2) {
+        var clear = S.rocks.every(function (o) { var d = wd(AW / 2, AH / 2, o.x, o.y); return Math.hypot(d[0], d[1]) > o.rad + 90 * s; });
+        if (clear) { sh.dead = 0; sh.x = AW / 2; sh.y = AH / 2; sh.vx = sh.vy = 0; sh.a = -Math.PI / 2; }
+      }
+      if (think && alive && t > S.nextHyper) { sh.hyper = t; S.nextHyper = t + 4 + 3 * R(); sparkle(sh.x, sh.y); }
+      if (sh.hyper && t - sh.hyper > 0.8) { sh.hyper = 0; sh.x = AW * (0.2 + 0.6 * R()); sh.y = AH * (0.2 + 0.6 * R()); sparkle(sh.x, sh.y); }
+      if (alive) {
+        var tgt = null, td = 1e9;
+        S.rocks.forEach(function (o) { var d = wd(sh.x, sh.y, o.x, o.y), dd = Math.hypot(d[0], d[1]); if (dd < td) { td = dd; tgt = o; } });
+        var want = sh.a;
+        if (tgt && (listen || st === "idle" || reply)) {
+          var d0 = wd(sh.x, sh.y, tgt.x, tgt.y), tt = Math.hypot(d0[0], d0[1]) / (520 * s);
+          want = Math.atan2(d0[1] + tgt.vy * tt, d0[0] + tgt.vx * tt);
+        } else if (think) want = sh.a + 1.2 * dt * 4;
+        var da = ((want - sh.a + Math.PI) % TAU + TAU) % TAU - Math.PI, turn = (listen ? 7 : 3.5) * dt;
+        sh.a += clamp(da, -turn, turn);
+        sh.thrust = listen ? clamp(lv * 1.4 - 0.2, 0, 1) : 0;
+        sh.vx += Math.cos(sh.a) * sh.thrust * 160 * s * dt; sh.vy += Math.sin(sh.a) * sh.thrust * 160 * s * dt;
+        sh.vx *= Math.pow(0.55, dt); sh.vy *= Math.pow(0.55, dt);
+        sh.x += sh.vx * dt; sh.y += sh.vy * dt; wrap(sh);
+        var fire = (listen && f.onset) || (reply && f.onset && R() < 0.45) || (st === "idle" && R() < dt * 0.9);   // it fights back while the assistant talks
+        if (fire && S.shots.length < 6) S.shots.push({ x: sh.x + Math.cos(sh.a) * 14 * s, y: sh.y + Math.sin(sh.a) * 14 * s, vx: Math.cos(sh.a) * 520 * s + sh.vx, vy: Math.sin(sh.a) * 520 * s + sh.vy, t: t });
+      }
+      // ---- the saucer: shows up on the assistant's voice and shoots on its syllables
+      if (!S.saucer && ((reply && f.onset && t - S.lastSaucer > 6) || t - S.lastSaucer > 28)) {
+        var fl = R() < 0.5; S.saucer = { x: fl ? 0 : AW, y: AH * (0.15 + 0.7 * R()), vx: (fl ? 1 : -1) * 110 * s, vy: 0, turnAt: t + 1 }; S.lastSaucer = t;
+      }
+      if (S.saucer) {
+        var sc0 = S.saucer; sc0.x += sc0.vx * dt; sc0.y += sc0.vy * dt;
+        if (t > sc0.turnAt) { sc0.vy = (R() - 0.5) * 140 * s; sc0.turnAt = t + 0.8 + R(); }
+        sc0.y = (sc0.y % AH + AH) % AH;
+        if (sc0.x < -30 * s || sc0.x > AW + 30 * s) S.saucer = null;
+        else if ((reply && f.onset) || R() < dt * 0.5) {
+          var d1 = wd(sc0.x, sc0.y, sh.x, sh.y), ea = Math.atan2(d1[1], d1[0]) + (R() - 0.5) * 0.5;
+          S.eshots.push({ x: sc0.x, y: sc0.y, vx: Math.cos(ea) * 330 * s, vy: Math.sin(ea) * 330 * s, t: t });
+        }
+      }
+      // ---- shots, hits, splits
+      function sparkle(x, y) { for (var j = 0; j < 10; j++) { var an = R() * TAU, v = (30 + 90 * R()) * s; S.parts.push({ x: x, y: y, vx: Math.cos(an) * v, vy: Math.sin(an) * v, t: t, life: 0.5 }); } }
+      function burst(x, y, n, v) { for (var j = 0; j < n; j++) { var an = R() * TAU, vv = (0.3 + R()) * v * s; S.parts.push({ x: x, y: y, vx: Math.cos(an) * vv, vy: Math.sin(an) * vv, t: t, life: 0.7 + 0.4 * R() }); } }
+      function hitRock(o) {
+        S.score += [20, 50, 100][o.size]; burst(o.x, o.y, 10 - o.size * 2, 140);
+        if (o.size < 2) for (var j = 0; j < 2; j++) { var an = Math.atan2(o.vy, o.vx) + (j ? 0.7 : -0.7) + (R() - 0.5) * 0.6, v = Math.hypot(o.vx, o.vy) * (1.3 + 0.4 * R()); rock(o.x, o.y, o.size + 1, Math.cos(an) * v, Math.sin(an) * v); }
+        o.gone = true;
+      }
+      S.shots = S.shots.filter(function (b) {
+        b.x += b.vx * dt; b.y += b.vy * dt; wrap(b);
+        if (t - b.t > 1.0) return false;
+        for (var j = 0; j < S.rocks.length; j++) { var o = S.rocks[j]; if (o.gone) continue; var d = wd(b.x, b.y, o.x, o.y); if (Math.hypot(d[0], d[1]) < o.rad) { hitRock(o); return false; } }
+        if (S.saucer) { var d2 = wd(b.x, b.y, S.saucer.x, S.saucer.y); if (Math.abs(d2[0]) < 18 * s && Math.abs(d2[1]) < 9 * s) { S.score += 200; burst(S.saucer.x, S.saucer.y, 12, 160); S.saucer = null; return false; } }
+        return true;
+      });
+      S.rocks = S.rocks.filter(function (o) { return !o.gone; });
+      S.eshots = S.eshots.filter(function (b) {
+        b.x += b.vx * dt; b.y += b.vy * dt; wrap(b);
+        if (t - b.t > 1.2) return false;
+        if (alive) { var d = wd(b.x, b.y, sh.x, sh.y); if (Math.hypot(d[0], d[1]) < 9 * s) { crash(); return false; } }
+        return true;
+      });
+      if (alive) S.rocks.forEach(function (o) { if (sh.dead) return; var d = wd(sh.x, sh.y, o.x, o.y); if (Math.hypot(d[0], d[1]) < o.rad * 0.85 + 7 * s) { hitRock(o); crash(); } });
+      S.rocks = S.rocks.filter(function (o) { return !o.gone; });
+      function crash() {
+        if (sh.dead) return;
+        sh.dead = t; S.lives = S.lives > 1 ? S.lives - 1 : 3;
+        var P = shipPts(sh.x, sh.y, sh.a);
+        for (var j = 0; j < 5; j++) { var a0 = P[j], b0 = P[(j + 1) % 5], an = R() * TAU; S.debris.push({ x0: a0[0], y0: a0[1], x1: b0[0], y1: b0[1], vx: Math.cos(an) * 40 * s, vy: Math.sin(an) * 40 * s, rot: (R() - 0.5) * 4, t: t }); }
+      }
+      AST_HI = Math.max(AST_HI, S.score);
+      alive = !sh.dead && !sh.hyper;
+      S.beat = Math.max(0, (S.beat || 0) - dt * 3.2);                           // the beam throbs on the assistant's syllables
+      if (reply && f.onset) S.beat = 1;
+      // ---- draw on a phosphor layer that fades a little each frame (afterglow)
+      var ph = r.buf("astPhos", W, H), q = ph.getContext("2d");
+      q.globalCompositeOperation = "destination-out"; q.fillStyle = "rgba(0,0,0," + (1 - Math.pow(0.5, dt * 30)).toFixed(3) + ")"; q.fillRect(0, 0, W, H);
+      q.globalCompositeOperation = "source-over";
+      var beam = "rgba(236,244,255," + (0.72 + 0.28 * Math.max(S.beat, reply ? lv : 0.6)).toFixed(3) + ")", lw = Math.max(1.2, (1.6 + 0.6 * S.beat) * s), dots = [], bands = f.bands;
+      q.strokeStyle = beam; q.lineWidth = lw; q.lineJoin = "round"; q.lineCap = "round";
+      q.beginPath();
+      S.rocks.forEach(function (o, n) {
+        var tp = S.tpl[o.tpl], amp = reply ? 0.3 * lv : 0.04 * lv;
+        for (var j = 0; j <= tp.length; j++) {
+          var pv = tp[j % tp.length], bi = (o.id * 5 + (j % tp.length) * 3) % 32, rip = 1 + amp * clamp((bands[bi] - 0.25) / 0.75, 0, 1) * (j % 2 ? 1 : -0.6);
+          var x = o.x + pv[0] * o.rad * rip, y = o.y + pv[1] * o.rad * rip;
+          if (j) q.lineTo(x, y); else q.moveTo(x, y);
+          if (j < tp.length) dots.push(x, y);
+        }
+      });
+      q.stroke();
+      function shipPts(x, y, a) {
+        var sz = 14 * s, c = Math.cos(a), sn = Math.sin(a);
+        return [[1, 0], [-0.75, 0.62], [-0.45, 0.3], [-0.45, -0.3], [-0.75, -0.62]].map(function (pp) { return [x + (pp[0] * c - pp[1] * sn) * sz, y + (pp[0] * sn + pp[1] * c) * sz]; });
+      }
+      if (alive) {
+        var P = shipPts(sh.x, sh.y, sh.a);
+        q.beginPath(); q.moveTo(P[0][0], P[0][1]); q.lineTo(P[1][0], P[1][1]); q.moveTo(P[0][0], P[0][1]); q.lineTo(P[4][0], P[4][1]);
+        q.moveTo(P[2][0], P[2][1]); q.lineTo(P[3][0], P[3][1]); q.stroke();
+        if (sh.thrust > 0.05 && Math.floor(t * 20) % 2) {
+          var c = Math.cos(sh.a), sn = Math.sin(sh.a), fx = sh.x - c * (14 * s) * (0.45 + 0.6 * sh.thrust), fy = sh.y - sn * (14 * s) * (0.45 + 0.6 * sh.thrust);
+          q.beginPath(); q.moveTo(P[2][0] + (P[3][0] - P[2][0]) * 0.2, P[2][1] + (P[3][1] - P[2][1]) * 0.2); q.lineTo(fx, fy); q.lineTo(P[3][0] + (P[2][0] - P[3][0]) * 0.2, P[3][1] + (P[2][1] - P[3][1]) * 0.2); q.stroke();
+        }
+        dots.push(P[0][0], P[0][1]);
+      }
+      S.debris = S.debris.filter(function (d) {
+        var age = t - d.t; if (age > 1.6) return false;
+        var mx = (d.x0 + d.x1) / 2 + d.vx * age, my = (d.y0 + d.y1) / 2 + d.vy * age, hx = (d.x1 - d.x0) / 2, hy = (d.y1 - d.y0) / 2, ra = d.rot * age, c = Math.cos(ra), sn = Math.sin(ra);
+        q.globalAlpha = 1 - age / 1.6; q.beginPath(); q.moveTo(mx - (hx * c - hy * sn), my - (hx * sn + hy * c)); q.lineTo(mx + (hx * c - hy * sn), my + (hx * sn + hy * c)); q.stroke(); q.globalAlpha = 1;
+        return true;
+      });
+      if (S.saucer) {                                                        // the classic saucer: a hull, a band, a dome
+        var ux = S.saucer.x, uy = S.saucer.y, a1 = 18 * s, b1 = 6 * s;
+        q.beginPath(); q.moveTo(ux - a1, uy); q.lineTo(ux + a1, uy); q.lineTo(ux + a1 * 0.55, uy + b1); q.lineTo(ux - a1 * 0.55, uy + b1); q.closePath();
+        q.moveTo(ux - a1, uy); q.lineTo(ux - a1 * 0.5, uy - b1); q.lineTo(ux + a1 * 0.5, uy - b1); q.lineTo(ux + a1, uy);
+        q.moveTo(ux - a1 * 0.4, uy - b1); q.lineTo(ux - a1 * 0.25, uy - b1 * 2); q.lineTo(ux + a1 * 0.25, uy - b1 * 2); q.lineTo(ux + a1 * 0.4, uy - b1); q.stroke();
+      }
+      q.fillStyle = "#fff";
+      var ds = Math.max(1.5, 2.2 * s);
+      for (i = 0; i < dots.length; i += 2) q.fillRect(dots[i] - ds / 2, dots[i + 1] - ds / 2, ds, ds);   // the beam dwells at the corners
+      S.shots.concat(S.eshots).forEach(function (b) { q.fillRect(b.x - ds, b.y - ds, ds * 2, ds * 2); });
+      S.parts = S.parts.filter(function (pt) {
+        var age = t - pt.t; if (age > pt.life) return false;
+        q.globalAlpha = 1 - age / pt.life; q.fillRect(pt.x + pt.vx * age - ds / 2, pt.y + pt.vy * age - ds / 2, ds, ds); q.globalAlpha = 1;
+        return true;
+      });
+      // score, high score and ships in vector digits
+      q.beginPath(); vecText(q, String(S.score).padStart(2, "0"), W * 0.06, H * 0.03, 5 * s); vecText(q, String(AST_HI), W * 0.47, H * 0.03, 3.2 * s); q.stroke();
+      for (k = 0; k < S.lives; k++) {
+        var LP = [[0, -1], [0.62, 0.75], [0.3, 0.45], [-0.3, 0.45], [-0.62, 0.75]], lx = W * 0.06 + k * 22 * s + 8 * s, ly = H * 0.03 + 50 * s, z = 10 * s;
+        q.beginPath(); q.moveTo(lx + LP[0][0] * z, ly + LP[0][1] * z); q.lineTo(lx + LP[1][0] * z, ly + LP[1][1] * z); q.moveTo(lx + LP[0][0] * z, ly + LP[0][1] * z); q.lineTo(lx + LP[4][0] * z, ly + LP[4][1] * z); q.moveTo(lx + LP[2][0] * z, ly + LP[2][1] * z); q.lineTo(lx + LP[3][0] * z, ly + LP[3][1] * z); q.stroke();
+      }
+      var g0 = r.ctx; g0.globalCompositeOperation = "source-over"; g0.globalAlpha = 1; g0.fillStyle = "#000"; g0.fillRect(0, 0, W, H);
+      g0.drawImage(ph, 0, 0);
+      r.bloom(ph, 0.6 + 0.45 * lv + 0.35 * S.beat, 0.005, 2);
+      scanlines(r, 0.06);
+    }
+  });
+
   /* ---------------- demo conversation (gallery + previews): analysed speech clips on a loop ---------------- */
   function simTexture(t) {
     var v = 0.30 + 0.38 * Math.abs(Math.sin(t * 3.3)) + 0.26 * Math.abs(Math.sin(t * 7.9 + 1.7)) * (0.5 + 0.5 * Math.sin(t * 1.3));
@@ -2142,7 +3054,7 @@ var VV_DEMO = {"user": {"frames": 136, "dur": 2.705, "b64": "AzkLICYAKzQ5LhYyMil
   }
   var DEMO_TEXT = {
     user: "Okay Nabu, can you show me something beautiful?",
-    reply: "Of course. Here's a little light show: eighteen different looks, all dancing to my voice. Pick your favourite, and I'll wear it every time we talk."
+    reply: "Of course. Here's a little light show: twenty-two different looks, all dancing to my voice. Pick your favourite, and I'll wear it every time we talk."
   };
   var demoClips = null;
   function getDemoClips() { if (!demoClips) demoClips = { user: unpackClip(VV_DEMO.user), reply: unpackClip(VV_DEMO.reply) }; return demoClips; }
@@ -2234,6 +3146,18 @@ var VV_DEMO = {"user": {"frames": 136, "dur": 2.705, "b64": "AzkLICYAKzQ5LhYyMil
     ".vv-t-lcars .vv-user{color:#99ccff;font-size:clamp(17px,2.4vw,33px);}",
     ".vv-t-lcars .vv-assistant{color:#ffcc99;font-size:clamp(19px,2.9vw,40px);max-height:25vh;}",
     ".vv-t-lcars.vv-long .vv-assistant{font-size:clamp(16px,2.2vw,30px);}",
+    // 1980s arcade: chunky monospace capitals, a yellow "player" status, white glowing text
+    ".vv-t-arcade .vv-content{font-family:'Lucida Console','Consolas','Courier New',monospace;text-transform:uppercase;letter-spacing:.05em;font-weight:700;}",
+    ".vv-t-arcade .vv-status{color:#ffe600;text-shadow:0 0 10px rgba(255,220,0,.6);}",
+    ".vv-t-arcade .vv-status:not(:empty)::after{content:'_';animation:vvBlink 1s steps(1) infinite;}",
+    ".vv-t-arcade .vv-user{color:#7ff3ff;text-shadow:0 0 8px rgba(60,220,255,.45),0 0 3px rgba(0,0,0,.9);font-size:clamp(15px,1.9vw,26px);}",
+    ".vv-t-arcade .vv-assistant{color:#fff;text-shadow:0 0 10px rgba(255,255,255,.35),0 0 3px rgba(0,0,0,.95);font-size:clamp(17px,2.35vw,32px);line-height:1.35;}",
+    ".vv-t-arcade.vv-long .vv-assistant{font-size:clamp(14px,1.9vw,26px);}",
+    // vector monitor: thin white capitals with a phosphor glow
+    ".vv-t-vector .vv-content{font-family:'Segoe UI','Helvetica Neue',Arial,sans-serif;text-transform:uppercase;letter-spacing:.14em;font-weight:300;}",
+    ".vv-t-vector .vv-status{color:rgba(255,255,255,.75);text-shadow:0 0 8px rgba(200,220,255,.8);}",
+    ".vv-t-vector .vv-user{color:rgba(225,235,255,.78);text-shadow:0 0 8px rgba(160,190,255,.5);}",
+    ".vv-t-vector .vv-assistant{color:#fff;text-shadow:0 0 10px rgba(210,225,255,.85),0 0 2px rgba(255,255,255,.9);}",
     "@keyframes vvBlink{50%{opacity:0;}}",
     "@media (prefers-reduced-motion: reduce){.vv-overlay{transition:none;}.vv-t-terminal .vv-status::after,.vv-t-mother .vv-status::after{animation:none;}}"
   ].join("");

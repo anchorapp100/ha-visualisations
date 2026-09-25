@@ -1,6 +1,6 @@
 /* =====================================================================
  * HA Visualisations: audio-reactive visuals for Home Assistant voice assistants.
- *   A skin engine (shared audio analysis + renderer + bloom), eighteen skins,
+ *   A skin engine (shared audio analysis + renderer + bloom), twenty-two skins,
  *   a demo driver (analysed speech clips) and the Home Assistant overlay.
  *   Source: src/*.js, built by build.py. MIT licence.
  * ===================================================================== */

@@ -54,6 +54,18 @@
     ".vv-t-lcars .vv-user{color:#99ccff;font-size:clamp(17px,2.4vw,33px);}",
     ".vv-t-lcars .vv-assistant{color:#ffcc99;font-size:clamp(19px,2.9vw,40px);max-height:25vh;}",
     ".vv-t-lcars.vv-long .vv-assistant{font-size:clamp(16px,2.2vw,30px);}",
+    // 1980s arcade: chunky monospace capitals, a yellow "player" status, white glowing text
+    ".vv-t-arcade .vv-content{font-family:'Lucida Console','Consolas','Courier New',monospace;text-transform:uppercase;letter-spacing:.05em;font-weight:700;}",
+    ".vv-t-arcade .vv-status{color:#ffe600;text-shadow:0 0 10px rgba(255,220,0,.6);}",
+    ".vv-t-arcade .vv-status:not(:empty)::after{content:'_';animation:vvBlink 1s steps(1) infinite;}",
+    ".vv-t-arcade .vv-user{color:#7ff3ff;text-shadow:0 0 8px rgba(60,220,255,.45),0 0 3px rgba(0,0,0,.9);font-size:clamp(15px,1.9vw,26px);}",
+    ".vv-t-arcade .vv-assistant{color:#fff;text-shadow:0 0 10px rgba(255,255,255,.35),0 0 3px rgba(0,0,0,.95);font-size:clamp(17px,2.35vw,32px);line-height:1.35;}",
+    ".vv-t-arcade.vv-long .vv-assistant{font-size:clamp(14px,1.9vw,26px);}",
+    // vector monitor: thin white capitals with a phosphor glow
+    ".vv-t-vector .vv-content{font-family:'Segoe UI','Helvetica Neue',Arial,sans-serif;text-transform:uppercase;letter-spacing:.14em;font-weight:300;}",
+    ".vv-t-vector .vv-status{color:rgba(255,255,255,.75);text-shadow:0 0 8px rgba(200,220,255,.8);}",
+    ".vv-t-vector .vv-user{color:rgba(225,235,255,.78);text-shadow:0 0 8px rgba(160,190,255,.5);}",
+    ".vv-t-vector .vv-assistant{color:#fff;text-shadow:0 0 10px rgba(210,225,255,.85),0 0 2px rgba(255,255,255,.9);}",
     "@keyframes vvBlink{50%{opacity:0;}}",
     "@media (prefers-reduced-motion: reduce){.vv-overlay{transition:none;}.vv-t-terminal .vv-status::after,.vv-t-mother .vv-status::after{animation:none;}}"
   ].join("");

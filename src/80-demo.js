@@ -5,7 +5,7 @@
   }
   var DEMO_TEXT = {
     user: "Okay Nabu, can you show me something beautiful?",
-    reply: "Of course. Here's a little light show: eighteen different looks, all dancing to my voice. Pick your favourite, and I'll wear it every time we talk."
+    reply: "Of course. Here's a little light show: twenty-two different looks, all dancing to my voice. Pick your favourite, and I'll wear it every time we talk."
   };
   var demoClips = null;
   function getDemoClips() { if (!demoClips) demoClips = { user: unpackClip(VV_DEMO.user), reply: unpackClip(VV_DEMO.reply) }; return demoClips; }

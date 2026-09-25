@@ -9,8 +9,16 @@
 var VV = window.VoiceVisuals, stage = new VV.Stage(document.getElementById("off"), { skin: "orb" });
 var picks = [["classic-vu", 2.2], ["aurora", 2.3], ["mercury", 1.9], ["ribbons", 7.6], ["galaxy", 7.4], ["halo", 2.3],
              ["pulsar", 7.6], ["phosphor", 4.3], ["tesla", 7.7], ["orb", 7.7], ["digital-vu", 2.3], ["paint-splash", 7.7],
-             ["fireworks", 11.5], ["synthwave", 7.7], ["hal-9000", 7.7], ["mother", 2.3], ["light-cycles", 11.5], ["lcars", 7.7]];
-var CW = 480, CH = 270, LB = 40, COLS = 6, PAD = 12, ROWS = Math.ceil(picks.length / COLS);
+             ["fireworks", 11.5], ["synthwave", 7.7], ["hal-9000", 7.7], ["mother", 2.3], ["light-cycles", 11.5], ["lcars", 7.7],
+             ["pac-man", 7.7], ["space-invaders", 7.7], ["defender", 7.7], ["asteroids", 9.4]];
+var CW = 480, CH = 270, LB = 40, COLS = 6, PAD = 12;
+(function () {                          // ?picks=id:t,id:t&cols=2&cw=960&ch=540 draws just those visuals
+  var q = new URLSearchParams(location.search);
+  if (q.get("picks")) picks = q.get("picks").split(",").map(function (x) { var a = x.split(":"); return [a[0], +(a[1] || 7.7)]; });
+  COLS = +(q.get("cols") || COLS); CW = +(q.get("cw") || CW); CH = +(q.get("ch") || CH);
+  if (q.get("cw")) document.getElementById("off").style.cssText = "width:" + CW + "px;height:" + CH + "px";
+})();
+var ROWS = Math.ceil(picks.length / COLS);
 var sheet = document.getElementById("sheet"), g = sheet.getContext("2d");
 sheet.width = COLS * CW + (COLS + 1) * PAD; sheet.height = ROWS * (CH + LB) + (ROWS + 1) * PAD;
 g.fillStyle = "#0e1621"; g.fillRect(0, 0, sheet.width, sheet.height);
@@ -25,5 +33,13 @@ picks.forEach(function (p, i) {
   g.fillText({ listening: "listening", responding: "replying", processing: "thinking", idle: "idle" }[s.state], x + CW - 3, y + CH + 20);
   g.textAlign = "left";
 });
+var free = ROWS * COLS - picks.length;
+if (free > 0 && !new URLSearchParams(location.search).get("picks")) {   // a title card in the empty cells of the last row
+  var cx = PAD + (picks.length % COLS) * (CW + PAD), cy = PAD + (ROWS - 1) * (CH + LB + PAD), cw = free * (CW + PAD) - PAD;
+  g.fillStyle = "#1a2431"; g.fillRect(cx, cy, cw, CH + LB);
+  g.fillStyle = "#ffb638"; g.font = "800 38px Segoe UI, Roboto, sans-serif"; g.textBaseline = "alphabetic"; g.fillText("HA Visualisations", cx + 34, cy + 92);
+  g.fillStyle = "#eff4f9"; g.font = "21px Segoe UI, Roboto, sans-serif";
+  [picks.length + " audio-reactive visuals for", "Home Assistant voice assistants.", "Plain JavaScript and canvas, MIT licence."].forEach(function (l, k) { g.fillText(l, cx + 34, cy + 150 + k * 34); });
+}
 document.title = "sheet " + sheet.width + "x" + sheet.height;
 </script></body></html>

@@ -4,11 +4,11 @@ Audio-reactive visuals for Home Assistant voice assistants. When you talk to Ass
 full-screen visual that reacts to the real sound. While it listens, it follows your voice through the screen's microphone. While
 it answers, it follows the assistant's actual reply audio, and the reply is shown as captions that turn page in time with the speech.
 
-There are 18 visuals to choose from. They're plain JavaScript and canvas, with no dependencies and nothing to install beyond copying four files.
+There are 22 visuals to choose from. They're plain JavaScript and canvas, with no dependencies and nothing to install beyond copying four files.
 
-![Light Cycles, one of the 18 visuals, showing a reply as captions](images/light-cycles.jpg)
+![Light Cycles, one of the 22 visuals, showing a reply as captions](images/light-cycles.jpg)
 
-![All 18 visuals](images/all-skins.jpg)
+![All 22 visuals](images/all-skins.jpg)
 
 ## What it does
 
@@ -77,6 +77,12 @@ Every setting is optional. Leave one out or empty to use the default.
 | Mother | MU/TH/UR 6000 from *Alien*: a green terminal beside a wall of chattering lamps. |
 | Light Cycles | *Tron*'s Grid: two light cycles turn on every syllable and leave walls shaped like your voices. |
 | LCARS | The *Star Trek* console, with spectrum bars that light as you talk. |
+| Pac-Man | A neon maze. Your syllables make Pac-Man chomp and dash; when the assistant answers, the ghosts turn blue and flash with its voice. |
+| Space Invaders | The cannon fires on your syllables; when the assistant answers, the invaders bob to its voice, march faster and drop bombs. |
+| Defender | A scrolling planet whose mountains are your voices. Your syllables fire the laser; the assistant's voice sends landers after the humanoids. |
+| Asteroids | A glowing vector rock field. Your syllables aim and fire; while the assistant answers, the rocks ripple with its voice and a saucer joins the fight. |
+
+![Pac-Man, Space Invaders, Defender and Asteroids](images/arcade.jpg)
 
 ## Development
 
@@ -89,7 +95,7 @@ Serve the repository folder over HTTP (for example `python -m http.server`) and 
 
 ## Credits
 
-HAL 9000, Mother, Light Cycles and LCARS are fan tributes to *2001: A Space Odyssey*, *Alien*, *Tron* and *Star Trek*. Everything is drawn in code, with no artwork, fonts or sounds from those films. This project isn't affiliated with or endorsed by their owners, and the names belong to their respective owners.
+HAL 9000, Mother, Light Cycles and LCARS are fan tributes to *2001: A Space Odyssey*, *Alien*, *Tron* and *Star Trek*. Pac-Man, Space Invaders, Defender and Asteroids are fan tributes to the arcade games of 1978 to 1981. Everything is drawn in code: the sprites, the maze, the rock shapes and the fonts are new drawings in the style of the era, with no artwork, fonts or sounds taken from the films or games. This project isn't affiliated with or endorsed by their owners, and the names belong to their respective owners.
 
 ## Licence
 
